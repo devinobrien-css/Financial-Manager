@@ -9,6 +9,7 @@ interface Goal {
   title: string
   notes: string | null
   target_amount: number | null
+  saved_amount: number | null
   target_date: string | null
   color: string
   completed: boolean
@@ -40,6 +41,8 @@ function GoalCard({ goal, x, y, isDragging, onHandlePointerDown, onToggle, onEdi
 }) {
   const accent = COLOR_ACCENTS[goal.color] ?? COLOR_ACCENTS.blue
   const isOverdue = goal.target_date && !goal.completed && new Date(goal.target_date + 'T00:00:00') < new Date()
+  const hasSavings = goal.target_amount != null && goal.saved_amount != null
+  const savingsPct = hasSavings ? Math.min((goal.saved_amount! / goal.target_amount!) * 100, 100) : null
   return (
     <div className="w-56 group select-none" style={{ position: 'absolute', left: x, top: y, zIndex: isDragging ? 50 : 1, opacity: goal.completed ? 0.5 : 1 }}>
       <div className={`bg-white rounded-xl border border-slate-200 border-l-4 ${accent.border} shadow-sm`}>
@@ -63,8 +66,23 @@ function GoalCard({ goal, x, y, isDragging, onHandlePointerDown, onToggle, onEdi
           {goal.notes && <p className="text-xs text-slate-500 leading-relaxed line-clamp-3 ml-6">{goal.notes}</p>}
           {(goal.target_amount != null || goal.target_date) && (
             <div className="flex flex-wrap gap-1 ml-6">
-              {goal.target_amount != null && <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{fmt(goal.target_amount)}</span>}
+              {goal.target_amount != null && (
+                <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
+                  {goal.saved_amount != null ? `${fmt(goal.saved_amount)} / ` : ''}{fmt(goal.target_amount)}
+                </span>
+              )}
               {goal.target_date && <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${isOverdue ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-600'}`}>{isOverdue ? '⚠ ' : ''}{fmtDate(goal.target_date)}</span>}
+            </div>
+          )}
+          {savingsPct !== null && (
+            <div className="ml-6">
+              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{ width: `${savingsPct}%`, backgroundColor: savingsPct >= 100 ? '#22c55e' : accent.dot.replace('bg-', '') === 'blue-400' ? '#60a5fa' : '#a3e635' }}
+                />
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">{Math.round(savingsPct)}% saved</p>
             </div>
           )}
         </div>
@@ -81,12 +99,13 @@ function GoalCard({ goal, x, y, isDragging, onHandlePointerDown, onToggle, onEdi
 
 function GoalForm({ initial, onSave, onClose }: {
   initial: Goal | null
-  onSave: (d: { title: string; notes: string; target_amount: string; target_date: string; color: string }) => Promise<void>
+  onSave: (d: { title: string; notes: string; target_amount: string; saved_amount: string; target_date: string; color: string }) => Promise<void>
   onClose: () => void
 }) {
   const [title, setTitle] = useState(initial?.title ?? '')
   const [notes, setNotes] = useState(initial?.notes ?? '')
   const [amount, setAmount] = useState(initial?.target_amount != null ? String(initial.target_amount) : '')
+  const [savedAmount, setSavedAmount] = useState(initial?.saved_amount != null ? String(initial.saved_amount) : '')
   const [date, setDate] = useState(initial?.target_date ?? '')
   const [color, setColor] = useState(initial?.color ?? 'blue')
   const [saving, setSaving] = useState(false)
@@ -96,7 +115,7 @@ function GoalForm({ initial, onSave, onClose }: {
     e.preventDefault()
     if (!title.trim()) { setError('Title is required'); return }
     setSaving(true)
-    await onSave({ title, notes, target_amount: amount, target_date: date, color })
+    await onSave({ title, notes, target_amount: amount, saved_amount: savedAmount, target_date: date, color })
     setSaving(false)
   }
 
@@ -138,10 +157,18 @@ function GoalForm({ initial, onSave, onClose }: {
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Target Date</label>
-                <input type="date" value={date} onChange={e => setDate(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300" />
+                <label className="block text-xs font-medium text-slate-500 mb-1">Amount Saved</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
+                  <input type="number" step="0.01" min="0" placeholder="0.00" value={savedAmount} onChange={e => setSavedAmount(e.target.value)}
+                    className="w-full pl-7 pr-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300" />
+                </div>
               </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Target Date</label>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300" />
             </div>
             {error && <p className="text-red-500 text-sm">{error}</p>}
             <div className="flex gap-3 pt-1">
@@ -221,11 +248,12 @@ export default function GoalsPage() {
     return max
   }, [goals, positions])
 
-  const handleGoalSave = async (data: { title: string; notes: string; target_amount: string; target_date: string; color: string }) => {
+  const handleGoalSave = async (data: { title: string; notes: string; target_amount: string; saved_amount: string; target_date: string; color: string }) => {
     const isEdit = editingGoal !== null
     const payload = {
       title: data.title, notes: data.notes,
       target_amount: data.target_amount ? Number.parseFloat(data.target_amount) : null,
+      saved_amount: data.saved_amount ? Number.parseFloat(data.saved_amount) : null,
       target_date: data.target_date || null,
       color: data.color,
       ...(isEdit ? { id: editingGoal.id } : {}),

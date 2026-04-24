@@ -52,6 +52,8 @@ function initSchema(db: Database.Database): void {
   migrateToV4(db)
   migrateToV5(db)
   migrateToV6(db)
+  migrateToV7(db)
+  migrateToV8(db)
 
   // Seed default categories
   seedCategories(db)
@@ -248,6 +250,62 @@ function migrateToV6(db: Database.Database): void {
   `)
 
   db.pragma('user_version = 6')
+}
+
+/**
+ * Migration v7:
+ *  - memo_enc on transactions (optional encrypted note)
+ *  - monthly_budget_enc on categories (optional encrypted budget limit)
+ *  - recurring_templates table for repeating transaction templates
+ */
+function migrateToV7(db: Database.Database): void {
+  const version = db.pragma('user_version', { simple: true }) as number
+  if (version >= 7) return
+
+  // Add memo_enc to transactions
+  const txCols = db.pragma('table_info(transactions)') as { name: string }[]
+  if (!txCols.some(c => c.name === 'memo_enc')) {
+    db.prepare('ALTER TABLE transactions ADD COLUMN memo_enc TEXT').run()
+  }
+
+  // Add monthly_budget_enc to categories
+  const catCols = db.pragma('table_info(categories)') as { name: string }[]
+  if (!catCols.some(c => c.name === 'monthly_budget_enc')) {
+    db.prepare('ALTER TABLE categories ADD COLUMN monthly_budget_enc TEXT').run()
+  }
+
+  // Recurring templates
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS recurring_templates (
+      id              TEXT PRIMARY KEY,
+      type            TEXT NOT NULL CHECK (type IN ('income','expense','transfer')),
+      description_enc TEXT NOT NULL,
+      amount_enc      TEXT NOT NULL,
+      account_id      TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+      to_account_id   TEXT REFERENCES accounts(id) ON DELETE SET NULL,
+      category_id     INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+      frequency       TEXT NOT NULL CHECK (frequency IN ('weekly','biweekly','monthly','quarterly','yearly')),
+      next_date       TEXT NOT NULL,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `)
+
+  db.pragma('user_version = 7')
+}
+
+/**
+ * Migration v8: add saved_amount_enc to goals for tracking progress.
+ */
+function migrateToV8(db: Database.Database): void {
+  const version = db.pragma('user_version', { simple: true }) as number
+  if (version >= 8) return
+
+  const cols = db.pragma('table_info(goals)') as { name: string }[]
+  if (!cols.some(c => c.name === 'saved_amount_enc')) {
+    db.prepare('ALTER TABLE goals ADD COLUMN saved_amount_enc TEXT').run()
+  }
+
+  db.pragma('user_version = 8')
 }
 
 function seedCategories(db: Database.Database): void {

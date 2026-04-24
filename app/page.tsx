@@ -30,6 +30,14 @@ interface Account {
   opening_balance: number
 }
 
+interface Category {
+  id: number
+  name: string
+  type: string
+  color: string
+  monthly_budget: number | null
+}
+
 function toMonthString(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
@@ -58,18 +66,21 @@ export default function DashboardPage() {
   const [month, setMonth] = useState(toMonthString(new Date()))
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
   const [trendData, setTrendData] = useState<Array<{ month: string; label: string; income: number; expenses: number; savings: number; rate: number }>>([])
   const [prevCatMap, setPrevCatMap] = useState<Record<string, { name: string; value: number; color: string }>>({})
 
   const load = useCallback(async (m: string) => {
     setLoading(true)
-    const [txRes, acRes] = await Promise.all([
+    const [txRes, acRes, catRes] = await Promise.all([
       fetch(`/api/transactions?month=${m}`),
       fetch('/api/accounts'),
+      fetch('/api/categories'),
     ])
     if (txRes.ok) setTransactions(await txRes.json())
     if (acRes.ok) setAccounts(await acRes.json())
+    if (catRes.ok) setCategories(await catRes.json())
     setLoading(false)
   }, [])
 
@@ -243,6 +254,19 @@ export default function DashboardPage() {
     ...(hasAccounts ? [{ label: 'Net Worth', value: fmt(netWorth), color: netWorth >= 0 ? 'text-green-600' : 'text-red-500', icon: Landmark, bg: 'bg-indigo-50' }] : []),
   ]
 
+  // Budget progress: categories with monthly_budget vs actual spending
+  const budgetRows = categories
+    .filter(c => c.type === 'expense' && c.monthly_budget != null && c.monthly_budget > 0)
+    .map(c => {
+      const spent = expenseByCat.find(e => e.name === c.name)?.value ?? 0
+      const pct = Math.min((spent / c.monthly_budget!) * 100, 200)
+      const over = spent > c.monthly_budget!
+      return { id: c.id, name: c.name, color: c.color, budget: c.monthly_budget!, spent, pct, over }
+    })
+    .sort((a, b) => b.pct - a.pct)
+
+  const overBudgetCats = budgetRows.filter(b => b.over)
+
   return (
     <div className="p-8 max-w-5xl mx-auto">
       {/* Header + month nav */}
@@ -263,6 +287,23 @@ export default function DashboardPage() {
         <div className="text-slate-400 text-sm">Loading…</div>
       ) : (
         <>
+          {/* Over-budget alert */}
+          {overBudgetCats.length > 0 && (
+            <div className="mb-6 bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-start gap-3">
+              <span className="text-red-500 text-lg leading-none mt-0.5">⚠</span>
+              <div>
+                <p className="text-sm font-medium text-red-700">
+                  {overBudgetCats.length === 1
+                    ? `${overBudgetCats[0].name} is over budget`
+                    : `${overBudgetCats.length} categories are over budget`}
+                </p>
+                <p className="text-xs text-red-500 mt-0.5">
+                  {overBudgetCats.map(c => `${c.name} (${fmt(c.spent)} / ${fmt(c.budget)})`).join(' · ')}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Summary cards */}
           <div className={`grid gap-4 mb-8 ${hasAccounts ? 'grid-cols-4' : 'grid-cols-3'}`}>
             {cards.map(({ label, value, color, icon: Icon, bg }) => (
@@ -403,6 +444,38 @@ export default function DashboardPage() {
               )}
             </div>
           </div>
+
+          {/* Monthly Budgets */}
+          {budgetRows.length > 0 && (
+            <div className="bg-white rounded-xl border border-slate-200 p-5 mb-6">
+              <h3 className="text-sm font-medium text-slate-700 mb-4">Monthly Budgets</h3>
+              <div className="space-y-3">
+                {budgetRows.map(b => {
+                  const barColor = b.over ? '#ef4444' : b.pct >= 80 ? '#f97316' : '#22c55e'
+                  return (
+                    <div key={b.id}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm text-slate-600 flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: b.color }} />
+                          {b.name}
+                          {b.over && <span className="text-xs text-red-500 font-medium">over budget!</span>}
+                        </span>
+                        <span className="text-xs tabular-nums text-slate-500">
+                          {fmt(b.spent)} / {fmt(b.budget)}
+                        </span>
+                      </div>
+                      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{ width: `${Math.min(b.pct, 100)}%`, backgroundColor: barColor }}
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Top expense categories */}
           {expenseByCat.length > 0 && (

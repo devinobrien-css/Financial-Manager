@@ -9,6 +9,7 @@ interface GoalRow {
   title_enc: string
   notes_enc: string | null
   amount_enc: string | null
+  saved_amount_enc: string | null
   target_date: string | null
   color: string
   completed: number
@@ -21,6 +22,7 @@ function decryptGoal(row: GoalRow, key: Buffer) {
     title: decrypt(row.title_enc, key),
     notes: row.notes_enc ? decrypt(row.notes_enc, key) : null,
     target_amount: row.amount_enc ? parseFloat(decrypt(row.amount_enc, key)) : null,
+    saved_amount: row.saved_amount_enc ? parseFloat(decrypt(row.saved_amount_enc, key)) : null,
     target_date: row.target_date,
     color: row.color ?? 'yellow',
     completed: row.completed === 1,
@@ -41,18 +43,19 @@ export async function POST(req: NextRequest) {
   let key: Buffer
   try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
 
-  const { title, notes, target_amount, target_date, color } = await req.json()
+  const { title, notes, target_amount, saved_amount, target_date, color } = await req.json()
   if (!title?.trim()) return NextResponse.json({ error: 'Title is required' }, { status: 400 })
 
   const db = getDb()
   db.prepare(`
-    INSERT INTO goals (id, title_enc, notes_enc, amount_enc, target_date, color)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO goals (id, title_enc, notes_enc, amount_enc, saved_amount_enc, target_date, color)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(
     uuidv4(),
     encrypt(title.trim(), key),
     notes?.trim() ? encrypt(notes.trim(), key) : null,
     target_amount != null ? encrypt(String(target_amount), key) : null,
+    saved_amount != null ? encrypt(String(saved_amount), key) : null,
     target_date || null,
     color ?? 'yellow',
   )
@@ -65,7 +68,7 @@ export async function PATCH(req: NextRequest) {
   try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
 
   const body = await req.json()
-  const { id, title, notes, target_amount, target_date, completed, color } = body
+  const { id, title, notes, target_amount, saved_amount, target_date, completed, color } = body
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
   const db = getDb()
@@ -86,6 +89,10 @@ export async function PATCH(req: NextRequest) {
   if (target_amount !== undefined) {
     updates.push('amount_enc = ?')
     params.push(target_amount != null ? encrypt(String(target_amount), key) : null)
+  }
+  if (saved_amount !== undefined) {
+    updates.push('saved_amount_enc = ?')
+    params.push(saved_amount != null ? encrypt(String(saved_amount), key) : null)
   }
   if (target_date !== undefined) {
     updates.push('target_date = ?')

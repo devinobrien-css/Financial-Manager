@@ -1,10 +1,10 @@
 'use client'
 
-import { ReactNode, useState } from 'react'
+import { ReactNode, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
-import { LockKeyhole, LayoutDashboard, ListOrdered, LogOut, Wallet, Target, Flag } from 'lucide-react'
+import { LockKeyhole, LayoutDashboard, ListOrdered, LogOut, Wallet, Target, Flag, BarChart2, Sun, Moon } from 'lucide-react'
 
 function LockScreen() {
   const { state, unlock, setup } = useAuth()
@@ -80,17 +80,48 @@ function LockScreen() {
   )
 }
 
-const navItems = [
-  { href: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/accounts', label: 'Accounts', icon: Wallet },
-  { href: '/transactions', label: 'Transactions', icon: ListOrdered },
-  { href: '/planning', label: 'Planning', icon: Target },
-  { href: '/goals', label: 'Goals', icon: Flag },
+const navGroups = [
+  {
+    label: 'Overview',
+    items: [
+      { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+    ],
+  },
+  {
+    label: 'Manage',
+    items: [
+      { href: '/accounts', label: 'Accounts', icon: Wallet },
+      { href: '/transactions', label: 'Transactions', icon: ListOrdered },
+      { href: '/reports', label: 'Reports', icon: BarChart2 },
+    ],
+  },
+  {
+    label: 'Plan',
+    items: [
+      { href: '/planning', label: 'Planning', icon: Target },
+      { href: '/goals', label: 'Goals', icon: Flag },
+    ],
+  },
 ]
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { state, lock } = useAuth()
   const pathname = usePathname()
+  const [darkMode, setDarkMode] = useState(false)
+
+  useEffect(() => {
+    const stored = localStorage.getItem('dark-mode')
+    if (stored === 'true') { setDarkMode(true); document.documentElement.classList.add('dark') }
+  }, [])
+
+  const toggleDark = () => {
+    setDarkMode(prev => {
+      const next = !prev
+      document.documentElement.classList.toggle('dark', next)
+      localStorage.setItem('dark-mode', String(next))
+      return next
+    })
+  }
 
   if (state === 'checking') {
     return (
@@ -112,25 +143,39 @@ export function AppShell({ children }: { children: ReactNode }) {
           <h1 className="text-white font-semibold text-base">Finance</h1>
           <p className="text-slate-500 text-xs mt-0.5">Local · Encrypted</p>
         </div>
-        <nav className="flex-1 space-y-1">
-          {navItems.map(({ href, label, icon: Icon }) => {
-            const active = pathname === href
-            return (
-              <Link
-                key={href}
-                href={href}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                  active
-                    ? 'bg-slate-700 text-white'
-                    : 'hover:bg-slate-800 hover:text-white'
-                }`}
-              >
-                <Icon className="w-4 h-4 shrink-0" />
-                {label}
-              </Link>
-            )
-          })}
+        <nav className="flex-1 space-y-5">
+          {navGroups.map(({ label, items }) => (
+            <div key={label}>
+              <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 px-3 mb-1">{label}</p>
+              <div className="space-y-0.5">
+                {items.map(({ href, label: itemLabel, icon: Icon }) => {
+                  const active = pathname === href
+                  return (
+                    <Link
+                      key={href}
+                      href={href}
+                      className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                        active
+                          ? 'bg-slate-700 text-white'
+                          : 'hover:bg-slate-800 hover:text-white'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4 shrink-0" />
+                      {itemLabel}
+                    </Link>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
+        <button
+          onClick={toggleDark}
+          className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-slate-800 hover:text-white transition-colors mt-2"
+        >
+          {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          {darkMode ? 'Light Mode' : 'Dark Mode'}
+        </button>
         <button
           onClick={lock}
           className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-slate-800 hover:text-white transition-colors mt-2"
@@ -141,7 +186,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Main */}
-      <main className="ml-56 min-h-screen">
+      <main className="ml-56 min-h-screen bg-slate-50 dark:bg-slate-900">
         {children}
       </main>
     </div>

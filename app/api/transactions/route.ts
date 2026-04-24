@@ -9,6 +9,7 @@ interface TxRow {
   type: string
   amount_enc: string
   description_enc: string | null
+  memo_enc: string | null
   category_id: number | null
   account_id: string | null
   to_account_id: string | null
@@ -39,6 +40,7 @@ function decryptRow(row: TxRow, key: Buffer, accountMap: Map<string, string>) {
     type: row.type,
     amount: parseFloat(decrypt(row.amount_enc, key)),
     description: row.description_enc ? decrypt(row.description_enc, key) : '',
+    memo: row.memo_enc ? decrypt(row.memo_enc, key) : null,
     category_id: row.category_id,
     category_name: row.category_name,
     category_color: row.category_color,
@@ -57,12 +59,22 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url)
   const month = searchParams.get('month') // YYYY-MM
+  const accountIdFilter = searchParams.get('account_id') // for statement view
+  const allTx = searchParams.get('all') === '1'
 
   const db = getDb()
   const accountMap = buildAccountMap(key)
 
   let rows: TxRow[]
-  if (month) {
+  if (accountIdFilter) {
+    rows = db.prepare(`
+      SELECT t.*, c.name as category_name, c.color as category_color
+      FROM transactions t
+      LEFT JOIN categories c ON t.category_id = c.id
+      WHERE t.account_id = ? OR t.to_account_id = ?
+      ORDER BY t.date DESC, t.created_at DESC
+    `).all(accountIdFilter, accountIdFilter) as TxRow[]
+  } else if (month) {
     rows = db.prepare(`
       SELECT t.*, c.name as category_name, c.color as category_color
       FROM transactions t
@@ -71,12 +83,13 @@ export async function GET(req: NextRequest) {
       ORDER BY t.date DESC, t.created_at DESC
     `).all(`${month}%`) as TxRow[]
   } else {
+    const limit = allTx ? '' : 'LIMIT 500'
     rows = db.prepare(`
       SELECT t.*, c.name as category_name, c.color as category_color
       FROM transactions t
       LEFT JOIN categories c ON t.category_id = c.id
       ORDER BY t.date DESC, t.created_at DESC
-      LIMIT 500
+      ${limit}
     `).all() as TxRow[]
   }
 
@@ -88,7 +101,7 @@ export async function POST(req: NextRequest) {
   try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
 
   const body = await req.json()
-  const { type, amount, description, category_id, account_id, to_account_id, date } = body
+  const { type, amount, description, memo, category_id, account_id, to_account_id, date } = body
 
   if (!type || !amount || !date) {
     return NextResponse.json({ error: 'type, amount, and date are required' }, { status: 400 })
@@ -108,23 +121,46 @@ export async function POST(req: NextRequest) {
   const id = uuidv4()
   const amount_enc = encrypt(numAmount.toFixed(2), key)
   const description_enc = description ? encrypt(description.trim(), key) : null
+  const memo_enc = memo ? encrypt(memo.trim(), key) : null
 
   db.prepare(`
     INSERT INTO transactions
-      (id, type, amount_enc, description_enc, category_id, account_id, to_account_id, date)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      (id, type, amount_enc, description_enc, memo_enc, category_id, account_id, to_account_id, date)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    id,
-    type,
-    amount_enc,
-    description_enc,
+    id, type, amount_enc, description_enc, memo_enc,
     type === 'transfer' ? null : (category_id ?? null),
-    account_id ?? null,
-    to_account_id ?? null,
-    date,
+    account_id ?? null, to_account_id ?? null, date,
   )
 
   return NextResponse.json({ id }, { status: 201 })
+}
+
+export async function PATCH(req: NextRequest) {
+  let key: Buffer
+  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+
+  const body = await req.json()
+  const { id, type, amount, description, memo, category_id, account_id, to_account_id, date } = body
+  if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
+
+  const db = getDb()
+  const updates: string[] = []
+  const params: unknown[] = []
+
+  if (type !== undefined) { updates.push('type = ?'); params.push(type) }
+  if (amount !== undefined) { updates.push('amount_enc = ?'); params.push(encrypt(parseFloat(amount).toFixed(2), key)) }
+  if (description !== undefined) { updates.push('description_enc = ?'); params.push(description ? encrypt(description.trim(), key) : null) }
+  if (memo !== undefined) { updates.push('memo_enc = ?'); params.push(memo ? encrypt(memo.trim(), key) : null) }
+  if (category_id !== undefined) { updates.push('category_id = ?'); params.push(category_id ?? null) }
+  if (account_id !== undefined) { updates.push('account_id = ?'); params.push(account_id ?? null) }
+  if (to_account_id !== undefined) { updates.push('to_account_id = ?'); params.push(to_account_id ?? null) }
+  if (date !== undefined) { updates.push('date = ?'); params.push(date) }
+
+  if (updates.length === 0) return NextResponse.json({ ok: true })
+  params.push(id)
+  db.prepare(`UPDATE transactions SET ${updates.join(', ')} WHERE id = ?`).run(...(params as Parameters<typeof db.prepare>))
+  return NextResponse.json({ ok: true })
 }
 
 export async function DELETE(req: NextRequest) {

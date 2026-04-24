@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Plus, Trash2, X, Wallet, CreditCard, Banknote, PiggyBank, Landmark, Pencil, GripVertical, ChevronDown } from 'lucide-react'
+import { Plus, Trash2, X, Wallet, CreditCard, Banknote, PiggyBank, Landmark, Pencil, GripVertical, ChevronDown, FileText } from 'lucide-react'
+import Link from 'next/link'
 import { useAuth } from '@/lib/auth-context'
 import {
   DndContext,
@@ -135,6 +136,13 @@ function SortableAccountRow({ account, onEdit, onDelete, deleting }: SortableAcc
           )}
         </div>
         <div className="flex items-center gap-3">
+          <Link
+            href={`/accounts/${account.id}`}
+            className="text-slate-300 hover:text-slate-600 transition-colors"
+            title="View statement"
+          >
+            <FileText className="w-4 h-4" />
+          </Link>
           <button
             onClick={() => onEdit(account)}
             className="text-slate-300 hover:text-slate-600 transition-colors"
