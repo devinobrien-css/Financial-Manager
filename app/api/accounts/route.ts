@@ -10,6 +10,7 @@ interface AccountRow {
   type: string
   opening_balance_enc: string
   apr_enc: string | null
+  credit_limit_enc: string | null
   created_at: string
 }
 
@@ -57,6 +58,7 @@ export async function GET() {
     const opening = parseFloat(decrypt(a.opening_balance_enc, key))
     const balance = opening + (effects.get(a.id) ?? 0)
     const apr = a.apr_enc ? parseFloat(decrypt(a.apr_enc, key)) : null
+    const credit_limit = a.credit_limit_enc ? parseFloat(decrypt(a.credit_limit_enc, key)) : null
     return {
       id: a.id,
       name: decrypt(a.name_enc, key),
@@ -64,6 +66,7 @@ export async function GET() {
       opening_balance: opening,
       balance,
       apr,
+      credit_limit,
       monthly_interest: (apr !== null && balance < 0) ? Math.abs(balance) * (apr / 100 / 12) : null,
       created_at: a.created_at,
     }
@@ -77,7 +80,7 @@ export async function POST(req: NextRequest) {
   try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
 
   const body = await req.json()
-  const { name, type, opening_balance, apr } = body
+  const { name, type, opening_balance, apr, credit_limit } = body
 
   if (!name || !type) {
     return NextResponse.json({ error: 'name and type are required' }, { status: 400 })
@@ -101,13 +104,19 @@ export async function POST(req: NextRequest) {
     if (!isNaN(aprNum) && aprNum >= 0) aprEnc = encrypt(aprNum.toFixed(4), key)
   }
 
+  let creditLimitEnc: string | null = null
+  if (type === 'credit' && credit_limit !== undefined && credit_limit !== null && credit_limit !== '') {
+    const lim = parseFloat(credit_limit)
+    if (!isNaN(lim) && lim > 0) creditLimitEnc = encrypt(lim.toFixed(2), key)
+  }
+
   const db = getDb()
   const id = uuidv4()
   db.prepare(
-    'INSERT INTO accounts (id, name_enc, type, opening_balance_enc, apr_enc) VALUES (?, ?, ?, ?, ?)'
-  ).run(id, encrypt(name.trim(), key), type, encrypt(storedBalance.toFixed(2), key), aprEnc)
+    'INSERT INTO accounts (id, name_enc, type, opening_balance_enc, apr_enc, credit_limit_enc) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(id, encrypt(name.trim(), key), type, encrypt(storedBalance.toFixed(2), key), aprEnc, creditLimitEnc)
 
-  return NextResponse.json({ id, name: name.trim(), type, balance: storedBalance, apr: apr ?? null }, { status: 201 })
+  return NextResponse.json({ id, name: name.trim(), type, balance: storedBalance, apr: apr ?? null, credit_limit: credit_limit ?? null }, { status: 201 })
 }
 
 export async function PATCH(req: NextRequest) {
@@ -126,7 +135,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ ok: true })
   }
 
-  const { id, name, type, opening_balance, apr } = body
+  const { id, name, type, opening_balance, apr, credit_limit } = body
 
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
   if (type && !['checking', 'savings', 'credit', 'cash', 'loan'].includes(type)) {
@@ -166,6 +175,17 @@ export async function PATCH(req: NextRequest) {
       params.push(!isNaN(aprNum) && aprNum >= 0 ? encrypt(aprNum.toFixed(4), key) : null)
     } else {
       updates.push('apr_enc = ?')
+      params.push(null)
+    }
+  }
+  if (credit_limit !== undefined) {
+    const resolvedType = type ?? (existing as { type: string }).type
+    if (resolvedType === 'credit' && credit_limit !== null && credit_limit !== '') {
+      const lim = parseFloat(credit_limit)
+      updates.push('credit_limit_enc = ?')
+      params.push(!isNaN(lim) && lim > 0 ? encrypt(lim.toFixed(2), key) : null)
+    } else {
+      updates.push('credit_limit_enc = ?')
       params.push(null)
     }
   }

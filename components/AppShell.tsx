@@ -4,7 +4,7 @@ import { ReactNode, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
-import { LockKeyhole, LayoutDashboard, ListOrdered, LogOut, Wallet, Target, Flag, BarChart2, Sun, Moon } from 'lucide-react'
+import { LockKeyhole, LayoutDashboard, ListOrdered, LogOut, Wallet, Target, Flag, BarChart2, Sun, Moon, TrendingUp, ShieldCheck } from 'lucide-react'
 
 function LockScreen() {
   const { state, unlock, setup } = useAuth()
@@ -100,6 +100,13 @@ const navGroups = [
     items: [
       { href: '/planning', label: 'Planning', icon: Target },
       { href: '/goals', label: 'Goals', icon: Flag },
+    ],
+  },
+  {
+    label: 'Insights',
+    items: [
+      { href: '/wealth', label: 'Wealth', icon: TrendingUp },
+      { href: '/credit', label: 'Credit Health', icon: ShieldCheck },
     ],
   },
 ]

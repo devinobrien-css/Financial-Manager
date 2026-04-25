@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { TrendingUp, TrendingDown, DollarSign, ChevronLeft, ChevronRight, Landmark } from 'lucide-react'
+import { TrendingUp, TrendingDown, DollarSign, ChevronLeft, ChevronRight, Landmark, Activity } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
@@ -28,6 +28,7 @@ interface Account {
   type: string
   balance: number
   opening_balance: number
+  credit_limit: number | null
 }
 
 interface Category {
@@ -68,7 +69,7 @@ export default function DashboardPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
-  const [trendData, setTrendData] = useState<Array<{ month: string; label: string; income: number; expenses: number; savings: number; rate: number }>>([])
+  const [trendData, setTrendData] = useState<Array<{ month: string; label: string; income: number; expenses: number; debtPaid: number; savings: number; rate: number }>>([])
   const [prevCatMap, setPrevCatMap] = useState<Record<string, { name: string; value: number; color: string }>>({})
 
   const load = useCallback(async (m: string) => {
@@ -97,12 +98,25 @@ export default function DashboardPage() {
         )
       )
     )
+    // Savings pool = checking + savings + investment. Transfers to credit/loan are debt paydown and reduce savings.
+    const acRes = await fetch('/api/accounts')
+    const acList = acRes.ok ? (await acRes.json()) as Account[] : []
+    const savingsPoolIds = new Set(
+      acList.filter(a => a.type === 'checking' || a.type === 'savings' || a.type === 'investment').map(a => a.id),
+    )
+    const debtAcctIds = new Set(acList.filter(a => a.type === 'credit' || a.type === 'loan').map(a => a.id))
     const trend = results.map((txs, i) => {
       const inc = txs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
       const exp = txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
-      const sav = inc - exp
+      // Transfers OUT of savings pool to credit/loan = debt paydown.
+      const debtPaid = txs
+        .filter(t => t.type === 'transfer'
+          && t.account_id && savingsPoolIds.has(t.account_id)
+          && t.to_account_id && debtAcctIds.has(t.to_account_id))
+        .reduce((s, t) => s + t.amount, 0)
+      const sav = inc - exp - debtPaid
       const rate = inc > 0 ? Math.round((sav / inc) * 100) : 0
-      return { month: months[i], label: shortMonth(months[i]), income: inc, expenses: exp, savings: sav, rate }
+      return { month: months[i], label: shortMonth(months[i]), income: inc, expenses: exp, debtPaid, savings: sav, rate }
     })
     setTrendData(trend)
     // prev month = results[4] (5th of 6 = one month before current)
@@ -137,6 +151,11 @@ export default function DashboardPage() {
 
   // Debt account IDs (credit + loan)
   const debtAccountIds = new Set(accounts.filter(a => a.type === 'credit' || a.type === 'loan').map(a => a.id))
+
+  // Savings pool IDs (checking + savings + investment)
+  const savingsPoolIds = new Set(
+    accounts.filter(a => a.type === 'checking' || a.type === 'savings' || a.type === 'investment').map(a => a.id),
+  )
 
   // Transfers going TO a debt account = debt payments
   const debtPayments = transactions
@@ -180,6 +199,20 @@ export default function DashboardPage() {
     })
     .filter(a => a.originalDebt > 0)
 
+  // Credit utilization per card (only cards with a set limit)
+  const creditUtilization = accounts
+    .filter(a => a.type === 'credit' && a.credit_limit !== null && a.credit_limit > 0)
+    .map(a => {
+      const used = Math.abs(Math.min(a.balance, 0))
+      const pct = Math.min((used / a.credit_limit!) * 100, 100)
+      const color = pct >= 90 ? '#ef4444' : pct >= 70 ? '#f97316' : '#22c55e'
+      return { id: a.id, name: a.name, used, limit: a.credit_limit!, pct, color }
+    })
+  const totalCreditUsed = creditUtilization.reduce((s, c) => s + c.used, 0)
+  const totalCreditLimit = creditUtilization.reduce((s, c) => s + c.limit, 0)
+  const overallUtilizationPct = totalCreditLimit > 0 ? Math.min((totalCreditUsed / totalCreditLimit) * 100, 100) : null
+  const overallUtilizationColor = overallUtilizationPct === null ? '#94a3b8' : overallUtilizationPct >= 90 ? '#ef4444' : overallUtilizationPct >= 70 ? '#f97316' : '#22c55e'
+
   // Category breakdown for expenses
   const expenseByCat = Object.values(
     transactions
@@ -193,6 +226,13 @@ export default function DashboardPage() {
         return acc
       }, {})
   ).sort((a, b) => b.value - a.value)
+
+  // Outflow breakdown = expenses by category + a debt-paydown wedge.
+  // Used for the dashboard donut so debt payments are visible alongside spending.
+  const outflowBreakdown = [
+    ...expenseByCat.map(c => ({ name: c.name, value: c.value, color: c.color })),
+    ...(debtPayments > 0 ? [{ name: 'Debt Paydown', value: debtPayments, color: '#3b82f6' }] : []),
+  ]
 
   // Category vs. prior month comparison (top 5 categories)
   const catComparisonData = expenseByCat.slice(0, 5).map(cat => ({
@@ -236,12 +276,18 @@ export default function DashboardPage() {
   ).sort((a, b) => b.value - a.value)
 
   // Daily totals for bar chart
-  const dailyMap: Record<string, { income: number; expense: number }> = {}
+  const dailyMap: Record<string, { income: number; expense: number; debtPaid: number }> = {}
   for (const t of transactions) {
-    if (t.type === 'transfer') continue
-    if (!dailyMap[t.date]) dailyMap[t.date] = { income: 0, expense: 0 }
+    if (!dailyMap[t.date]) dailyMap[t.date] = { income: 0, expense: 0, debtPaid: 0 }
     if (t.type === 'income') dailyMap[t.date].income += t.amount
     else if (t.type === 'expense') dailyMap[t.date].expense += t.amount
+    else if (
+      t.type === 'transfer'
+      && t.account_id && savingsPoolIds.has(t.account_id)
+      && t.to_account_id && debtAccountIds.has(t.to_account_id)
+    ) {
+      dailyMap[t.date].debtPaid += t.amount
+    }
   }
   const dailyData = Object.entries(dailyMap)
     .sort(([a], [b]) => a.localeCompare(b))
@@ -267,6 +313,63 @@ export default function DashboardPage() {
 
   const overBudgetCats = budgetRows.filter(b => b.over)
 
+  // Savings rate — money kept in or moved to checking/savings/investment.
+  // Transfers OUT of that pool to credit/loan are debt paydown, not savings.
+  const savingsOutflow = transactions
+    .filter(t => t.type === 'transfer'
+      && t.account_id && savingsPoolIds.has(t.account_id)
+      && (!t.to_account_id || !savingsPoolIds.has(t.to_account_id)))
+    .reduce((s, t) => s + t.amount, 0)
+  const trueSavings = net - savingsOutflow
+  const savingsRate = income > 0 ? Math.round((trueSavings / income) * 100) : 0
+
+  // Debt paydown rate — % of income that went to paying down credit/loan balances.
+  const debtPaydownRate = income > 0 ? Math.round((debtPayments / income) * 100) : 0
+
+  // Spending velocity (projection to end of month — only for current month)
+  const isCurrentMonth = toMonthString(new Date()) === month
+  const [yearNum, monthNum] = month.split('-').map(Number)
+  const daysInMonth = new Date(yearNum, monthNum, 0).getDate()
+  const daysElapsed = isCurrentMonth ? new Date().getDate() : daysInMonth
+  const projectedMonthSpend = isCurrentMonth && daysElapsed > 0 && daysElapsed < daysInMonth
+    ? (expenses / daysElapsed) * daysInMonth
+    : null
+
+  // Unusual spending: expenses notably above the category's per-transaction average
+  const catTxCounts: Record<string, number> = {}
+  for (const t of transactions) {
+    if (t.type !== 'expense') continue
+    const key = t.category_name ?? 'Uncategorized'
+    catTxCounts[key] = (catTxCounts[key] ?? 0) + 1
+  }
+  const catAvgMap: Record<string, number> = {}
+  for (const cat of expenseByCat) {
+    const count = catTxCounts[cat.name] ?? 1
+    catAvgMap[cat.name] = cat.value / count
+  }
+  const unusualTransactions = transactions
+    .filter(t => t.type === 'expense' && t.amount >= 25)
+    .filter(t => {
+      const count = catTxCounts[t.category_name ?? ''] ?? 0
+      if (count < 2) return false
+      const avg = catAvgMap[t.category_name ?? ''] ?? t.amount
+      return t.amount >= avg * 1.8
+    })
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 3)
+
+  // Monthly financial health score (0–100)
+  const savingsScore = income > 0
+    ? (savingsRate >= 20 ? 100 : savingsRate >= 10 ? 75 : savingsRate >= 0 ? 50 : 25)
+    : 50
+  const utilizationAvgScore = creditUtilization.length === 0 ? 100
+    : Math.round(creditUtilization.reduce((s, c) => s + (c.pct < 10 ? 100 : c.pct < 30 ? 80 : c.pct < 70 ? 50 : 20), 0) / creditUtilization.length)
+  const budgetAdherenceScore = budgetRows.length === 0 ? 100
+    : Math.round((budgetRows.filter(b => !b.over).length / budgetRows.length) * 100)
+  const healthScore = Math.round(savingsScore * 0.4 + utilizationAvgScore * 0.3 + budgetAdherenceScore * 0.3)
+  const healthScoreColor = healthScore >= 80 ? 'text-green-600' : healthScore >= 60 ? 'text-yellow-600' : 'text-red-500'
+  const healthScoreLabel = healthScore >= 80 ? 'Excellent' : healthScore >= 60 ? 'Good' : healthScore >= 40 ? 'Fair' : 'Needs Attention'
+
   return (
     <div className="p-8 max-w-5xl mx-auto">
       {/* Header + month nav */}
@@ -289,7 +392,7 @@ export default function DashboardPage() {
         <>
           {/* Over-budget alert */}
           {overBudgetCats.length > 0 && (
-            <div className="mb-6 bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-start gap-3">
+            <div className="mb-4 bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-start gap-3">
               <span className="text-red-500 text-lg leading-none mt-0.5">⚠</span>
               <div>
                 <p className="text-sm font-medium text-red-700">
@@ -304,8 +407,35 @@ export default function DashboardPage() {
             </div>
           )}
 
+          {/* Credit utilization alert */}
+          {overallUtilizationPct !== null && overallUtilizationPct >= 30 && (
+            <div className="mb-4 bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 flex items-start gap-3">
+              <span className="text-orange-500 text-lg leading-none mt-0.5">⚠</span>
+              <div>
+                <p className="text-sm font-medium text-orange-700">Credit utilization is above 30%</p>
+                <p className="text-xs text-orange-500 mt-0.5">
+                  Overall: {overallUtilizationPct.toFixed(0)}% ·{' '}
+                  {creditUtilization.filter(c => c.pct >= 30).map(c => `${c.name}: ${c.pct.toFixed(0)}%`).join(' · ')}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Unusual spending alert */}
+          {unusualTransactions.length > 0 && (
+            <div className="mb-6 bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3 flex items-start gap-3">
+              <span className="text-yellow-600 text-lg leading-none mt-0.5">💡</span>
+              <div>
+                <p className="text-sm font-medium text-yellow-700">Unusual spending detected this month</p>
+                <p className="text-xs text-yellow-600 mt-0.5">
+                  {unusualTransactions.map(t => `${t.description}: ${fmt(t.amount)}`).join(' · ')}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Summary cards */}
-          <div className={`grid gap-4 mb-8 ${hasAccounts ? 'grid-cols-4' : 'grid-cols-3'}`}>
+          <div className={`grid gap-4 mb-4 ${hasAccounts ? 'grid-cols-4' : 'grid-cols-3'}`}>
             {cards.map(({ label, value, color, icon: Icon, bg }) => (
               <div key={label} className="bg-white rounded-xl border border-slate-200 p-5">
                 <div className="flex items-center justify-between mb-3">
@@ -315,9 +445,81 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <p className={`text-2xl font-semibold ${color}`}>{value}</p>
+                {label === 'Net This Month' && income > 0 && (
+                  <p className={`text-xs mt-1 ${savingsRate >= 20 ? 'text-green-500' : savingsRate >= 0 ? 'text-yellow-500' : 'text-red-400'}`}>
+                    {savingsRate}% savings rate
+                  </p>
+                )}
               </div>
             ))}
           </div>
+
+          {/* Financial Pulse row */}
+          {(income > 0 || expenses > 0) && (
+            <div className="grid grid-cols-4 gap-4 mb-8">
+              <div className="bg-white rounded-xl border border-slate-200 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <Activity className="w-3.5 h-3.5 text-indigo-400" />
+                  <span className="text-xs text-slate-500">Monthly Health Score</span>
+                </div>
+                <p className={`text-2xl font-semibold ${healthScoreColor}`}>{healthScore}</p>
+                <p className={`text-xs mt-0.5 ${healthScoreColor}`}>{healthScoreLabel}</p>
+                <div className="mt-2 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-full rounded-full transition-all" style={{ width: `${healthScore}%`, backgroundColor: healthScore >= 80 ? '#22c55e' : healthScore >= 60 ? '#eab308' : '#ef4444' }} />
+                </div>
+                <p className="text-xs text-slate-300 mt-1.5">Savings 40% · Utilization 30% · Budget 30%</p>
+              </div>
+              <div className="bg-white rounded-xl border border-slate-200 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <DollarSign className="w-3.5 h-3.5 text-green-400" />
+                  <span className="text-xs text-slate-500">Savings Rate</span>
+                </div>
+                <p className={`text-2xl font-semibold ${savingsRate >= 20 ? 'text-green-600' : savingsRate >= 0 ? 'text-yellow-600' : 'text-red-500'}`}>
+                  {income > 0 ? `${savingsRate}%` : 'N/A'}
+                </p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {income > 0
+                    ? (savingsRate >= 20 ? 'Great — above 20% goal' : savingsRate >= 0 ? 'Below 20% goal' : 'Spending more than earning')
+                    : 'No income yet this month'}
+                </p>
+              </div>
+              <div className="bg-white rounded-xl border border-slate-200 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <TrendingDown className="w-3.5 h-3.5 text-blue-400" />
+                  <span className="text-xs text-slate-500">Debt Paydown Rate</span>
+                </div>
+                <p className={`text-2xl font-semibold ${debtPaydownRate > 0 ? 'text-blue-600' : 'text-slate-400'}`}>
+                  {income > 0 ? `${debtPaydownRate}%` : 'N/A'}
+                </p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {income > 0
+                    ? (debtPayments > 0 ? `${fmt(debtPayments)} toward debt` : 'No debt payments this month')
+                    : 'No income yet this month'}
+                </p>
+              </div>
+              <div className="bg-white rounded-xl border border-slate-200 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <TrendingUp className="w-3.5 h-3.5 text-orange-400" />
+                  <span className="text-xs text-slate-500">{isCurrentMonth ? 'Spending Velocity' : 'Period Spending'}</span>
+                </div>
+                {projectedMonthSpend !== null ? (
+                  <>
+                    <p className={`text-2xl font-semibold ${income > 0 && projectedMonthSpend > income ? 'text-red-500' : 'text-slate-700'}`}>
+                      {fmt(projectedMonthSpend)}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Projected by end of month (day {daysElapsed}/{daysInMonth})
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-2xl font-semibold text-slate-700">{fmt(expenses)}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Total for this period</p>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Net Worth Trajectory */}
           {netWorthTrend.length > 0 && (
@@ -369,6 +571,7 @@ export default function DashboardPage() {
                     <Tooltip formatter={(v: number) => fmt(v)} />
                     <Bar dataKey="income" fill="#22c55e" radius={[3, 3, 0, 0]} name="Income" />
                     <Bar dataKey="expense" fill="#ef4444" radius={[3, 3, 0, 0]} name="Expense" />
+                    <Bar dataKey="debtPaid" fill="#3b82f6" radius={[3, 3, 0, 0]} name="Debt Paid" />
                   </BarChart>
                 </ResponsiveContainer>
               )}
@@ -376,14 +579,14 @@ export default function DashboardPage() {
 
             {/* Expense breakdown donut */}
             <div className="bg-white rounded-xl border border-slate-200 p-5">
-              <h3 className="text-sm font-medium text-slate-700 mb-4">Expense Breakdown</h3>
-              {expenseByCat.length === 0 ? (
-                <div className="h-48 flex items-center justify-center text-slate-400 text-sm">No expenses</div>
+              <h3 className="text-sm font-medium text-slate-700 mb-4">Money Out Breakdown</h3>
+              {outflowBreakdown.length === 0 ? (
+                <div className="h-48 flex items-center justify-center text-slate-400 text-sm">No outflows</div>
               ) : (
                 <ResponsiveContainer width="100%" height={200}>
                   <PieChart>
                     <Pie
-                      data={expenseByCat}
+                      data={outflowBreakdown}
                       dataKey="value"
                       nameKey="name"
                       cx="50%"
@@ -391,8 +594,8 @@ export default function DashboardPage() {
                       innerRadius={50}
                       outerRadius={80}
                     >
-                      {expenseByCat.map((entry, i) => (
-                        <Cell key={i} fill={entry.color} />
+                      {outflowBreakdown.map((entry) => (
+                        <Cell key={entry.name} fill={entry.color} />
                       ))}
                     </Pie>
                     <Tooltip formatter={(v: number) => fmt(v)} />
@@ -418,7 +621,8 @@ export default function DashboardPage() {
                     <Tooltip formatter={(v: number) => fmt(v)} />
                     <Bar dataKey="income" fill="#bbf7d0" name="Income" radius={[3, 3, 0, 0]} />
                     <Bar dataKey="expenses" fill="#fecaca" name="Expenses" radius={[3, 3, 0, 0]} />
-                    <Line type="monotone" dataKey="savings" stroke="#6366f1" strokeWidth={2} dot={false} name="Net" />
+                    <Bar dataKey="debtPaid" fill="#bfdbfe" name="Debt Paydown" radius={[3, 3, 0, 0]} />
+                    <Line type="monotone" dataKey="savings" stroke="#6366f1" strokeWidth={2} dot={false} name="Saved" />
                   </ComposedChart>
                 </ResponsiveContainer>
               )}
@@ -670,6 +874,52 @@ export default function DashboardPage() {
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+              {creditUtilization.length > 0 && (
+                <div className="bg-white rounded-xl border border-slate-200 p-5">
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="text-sm font-medium text-slate-700">Credit Utilization</h3>
+                    {overallUtilizationPct !== null && (
+                      <span className="text-xs font-semibold" style={{ color: overallUtilizationColor }}>
+                        {overallUtilizationPct.toFixed(0)}% overall
+                      </span>
+                    )}
+                  </div>
+                  {overallUtilizationPct !== null && (
+                    <div className="mb-4">
+                      <div className="relative h-2 w-full bg-slate-100 rounded-full mb-1">
+                        <div className="h-full rounded-full transition-all" style={{ width: `${overallUtilizationPct}%`, backgroundColor: overallUtilizationColor }} />
+                        {/* Recommended 30% marker */}
+                        <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 flex flex-col items-center" style={{ left: '30%' }}>
+                          <div className="w-0.5 h-4 bg-slate-400 rounded-full" />
+                        </div>
+                      </div>
+                      <div className="relative flex justify-between text-xs text-slate-400">
+                        <span>{fmt(totalCreditUsed)} used</span>
+                        <span className="absolute text-slate-300" style={{ left: '30%', transform: 'translateX(-50%)' }}>30%</span>
+                        <span>{fmt(totalCreditLimit)} total limit</span>
+                      </div>
+                    </div>
+                  )}
+                  <div className="space-y-3">
+                    {creditUtilization.map(c => (
+                      <div key={c.id}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs text-slate-600 truncate max-w-[60%]">{c.name}</span>
+                          <span className="text-xs font-medium tabular-nums" style={{ color: c.color }}>
+                            {c.pct.toFixed(0)}% &nbsp;<span className="text-slate-400 font-normal">{fmt(c.used)} / {fmt(c.limit)}</span>
+                          </span>
+                        </div>
+                        <div className="relative h-1.5 w-full bg-slate-100 rounded-full">
+                          <div className="h-full rounded-full transition-all" style={{ width: `${c.pct}%`, backgroundColor: c.color }} />
+                          {/* Recommended 30% marker */}
+                          <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-0.5 h-3.5 bg-slate-400 rounded-full" style={{ left: '30%' }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-slate-300 mt-3">Recommended: keep utilization below 30%</p>
                 </div>
               )}
             </div>

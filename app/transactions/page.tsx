@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import { Plus, Trash2, ChevronLeft, ChevronRight, X, ArrowRight, ChevronDown, Check, Wallet, CreditCard, Banknote, PiggyBank, Landmark, Pencil, Search, RefreshCw, ChevronUp } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 
@@ -101,23 +102,45 @@ function CustomSelect({
   placeholder?: string
 }) {
   const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({})
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      if (
+        triggerRef.current && !triggerRef.current.contains(e.target as Node) &&
+        dropdownRef.current && !dropdownRef.current.contains(e.target as Node)
+      ) setOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
+  const handleOpen = () => {
+    if (!triggerRef.current) return
+    const rect = triggerRef.current.getBoundingClientRect()
+    const spaceBelow = window.innerHeight - rect.bottom
+    const dropdownHeight = Math.min(options.length * 52 + 8, 224)
+    const openUpward = spaceBelow < dropdownHeight && rect.top > dropdownHeight
+    setDropdownStyle({
+      position: 'fixed',
+      top: openUpward ? rect.top - dropdownHeight - 4 : rect.bottom + 4,
+      left: rect.left,
+      width: rect.width,
+      zIndex: 9999,
+    })
+    setOpen(o => !o)
+  }
+
   const selected = options.find(o => o.value === value)
 
   return (
-    <div ref={ref} className="relative">
+    <div className="relative">
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => setOpen(o => !o)}
+        onClick={handleOpen}
         className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-300"
       >
         <span className="flex items-center gap-2 min-w-0">
@@ -134,8 +157,8 @@ function CustomSelect({
         </span>
         <ChevronDown className={`w-4 h-4 text-slate-400 flex-shrink-0 ml-2 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
-      {open && (
-        <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
+      {open && createPortal(
+        <div ref={dropdownRef} style={dropdownStyle} className="bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
           <div className="max-h-56 overflow-y-auto py-1">
             {options.map(o => {
               const Icon = o.icon
@@ -165,7 +188,8 @@ function CustomSelect({
               )
             })}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

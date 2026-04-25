@@ -1,8 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Plus, Trash2, X, Wallet, CreditCard, Banknote, PiggyBank, Landmark, Pencil, GripVertical, ChevronDown, FileText } from 'lucide-react'
-import Link from 'next/link'
+import { Plus, Trash2, X, Wallet, CreditCard, Banknote, PiggyBank, Landmark, Pencil, GripVertical, ChevronDown, FileText, ArrowRight, TrendingUp } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import {
   DndContext,
@@ -23,15 +22,194 @@ import { CSS } from '@dnd-kit/utilities'
 interface Account {
   id: string
   name: string
-  type: 'checking' | 'savings' | 'credit' | 'cash' | 'loan'
+  type: 'checking' | 'savings' | 'credit' | 'cash' | 'loan' | 'investment'
   balance: number
   opening_balance: number
   apr: number | null
+  credit_limit: number | null
   monthly_interest: number | null
 }
 
 function fmt(n: number) {
   return Math.abs(n).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+}
+
+function fmtSigned(n: number) {
+  return n.toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+}
+
+interface StatementTransaction {
+  id: string
+  type: 'income' | 'expense' | 'transfer'
+  amount: number
+  description: string
+  memo: string | null
+  category_name: string | null
+  category_color: string | null
+  account_id: string | null
+  account_name: string | null
+  to_account_id: string | null
+  to_account_name: string | null
+  date: string
+}
+
+function StatementModal({ accountId, accounts, onClose }: {
+  accountId: string | null
+  accounts: Account[]
+  onClose: () => void
+}) {
+  const { lock } = useAuth()
+  const [transactions, setTransactions] = useState<StatementTransaction[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!accountId) return
+    setLoading(true)
+    setTransactions([])
+    fetch(`/api/transactions?account_id=${accountId}&all=1`)
+      .then(r => { if (r.status === 401) { lock(); return null } return r.ok ? r.json() : [] })
+      .then((data: StatementTransaction[] | null) => {
+        if (data) setTransactions(data.toSorted((a, b) => a.date.localeCompare(b.date)))
+        setLoading(false)
+      })
+  }, [accountId, lock])
+
+  const account = accounts.find(a => a.id === accountId) ?? null
+
+  const rows = (() => {
+    if (!account || !accountId) return []
+    let balance = account.opening_balance
+    const result: Array<StatementTransaction & { runningBalance: number }> = []
+    for (const t of transactions) {
+      if (t.type === 'income') balance += t.amount
+      else if (t.type === 'expense') balance -= t.amount
+      else if (t.type === 'transfer') {
+        if (t.account_id === accountId) balance -= t.amount
+        else balance += t.amount
+      }
+      result.push({ ...t, runningBalance: balance })
+    }
+    return result.reverse()
+  })()
+
+  const income = transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
+  const expenses = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+
+  if (!accountId) return null
+
+  return (
+    <div
+      role="presentation"
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+      onKeyDown={e => { if (e.key === 'Escape') onClose() }}
+    >
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col" style={{ maxHeight: '88vh' }}>
+        {/* Modal header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 flex-shrink-0">
+          <div>
+            {account
+              ? <h3 className="text-lg font-semibold text-slate-800">{account.name}</h3>
+              : <div className="h-6 w-32 bg-slate-100 rounded animate-pulse" />}
+            <p className="text-xs text-slate-400 mt-0.5">Account Statement</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Stats row */}
+        {!loading && account && (
+          <div className="flex gap-4 px-6 py-4 border-b border-slate-100 flex-shrink-0">
+            <div className="bg-white rounded-xl border border-slate-200 px-4 py-3">
+              <p className="text-xs text-slate-400">Current Balance</p>
+              <p className={`text-lg font-semibold tabular-nums ${account.balance < 0 ? 'text-red-500' : 'text-slate-800'}`}>
+                {account.balance < 0 ? '-' : ''}{fmt(account.balance)}
+              </p>
+            </div>
+            <div className="bg-green-50 rounded-xl border border-green-100 px-4 py-3">
+              <p className="text-xs text-slate-400">Total In</p>
+              <p className="text-lg font-semibold text-green-600">{fmtSigned(income)}</p>
+            </div>
+            <div className="bg-red-50 rounded-xl border border-red-100 px-4 py-3">
+              <p className="text-xs text-slate-400">Total Out</p>
+              <p className="text-lg font-semibold text-red-500">{fmtSigned(expenses)}</p>
+            </div>
+            <div className="bg-slate-50 rounded-xl border border-slate-200 px-4 py-3">
+              <p className="text-xs text-slate-400">Transactions</p>
+              <p className="text-lg font-semibold text-slate-700">{transactions.length}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Table */}
+        <div className="overflow-y-auto flex-1">
+          {loading ? (
+            <div className="p-6 text-slate-400 text-sm">Loading…</div>
+          ) : rows.length === 0 ? (
+            <div className="p-12 text-center text-slate-400 text-sm">No transactions for this account.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-slate-50 z-10">
+                <tr className="border-b border-slate-100">
+                  <th className="text-left py-3 px-4 text-xs text-slate-500 font-medium">Date</th>
+                  <th className="text-left py-3 px-4 text-xs text-slate-500 font-medium">Description</th>
+                  <th className="text-left py-3 px-4 text-xs text-slate-500 font-medium">Category</th>
+                  <th className="text-right py-3 px-4 text-xs text-slate-500 font-medium">Amount</th>
+                  <th className="text-right py-3 px-4 text-xs text-slate-500 font-medium">Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(t => {
+                  const isIn = t.type === 'income' || (t.type === 'transfer' && t.to_account_id === accountId)
+                  const isOut = t.type === 'expense' || (t.type === 'transfer' && t.account_id === accountId)
+                  return (
+                    <tr key={t.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
+                      <td className="py-3 px-4 text-slate-400 whitespace-nowrap text-xs">{t.date}</td>
+                      <td className="py-3 px-4 text-slate-700">
+                        {t.type === 'transfer' ? (
+                          <span className="flex items-center gap-1 text-slate-500 italic text-xs">
+                            <span>{t.account_name ?? '?'}</span>
+                            <ArrowRight className="w-3 h-3" />
+                            <span>{t.to_account_name ?? '?'}</span>
+                          </span>
+                        ) : (
+                          <div>
+                            <span>{t.description || <span className="text-slate-400 italic">—</span>}</span>
+                            {t.memo && <p className="text-xs text-slate-400 mt-0.5">{t.memo}</p>}
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-3 px-4">
+                        {t.type === 'transfer' ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">Transfer</span>
+                        ) : t.category_name ? (
+                          <span
+                            className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium text-white"
+                            style={{ backgroundColor: t.category_color ?? '#94a3b8' }}
+                          >
+                            {t.category_name}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 text-xs">—</span>
+                        )}
+                      </td>
+                      <td className={`py-3 px-4 text-right font-semibold tabular-nums ${isIn ? 'text-green-600' : isOut ? 'text-red-500' : 'text-slate-500'}`}>
+                        {isIn ? '+' : isOut ? '-' : ''}{fmt(t.amount)}
+                      </td>
+                      <td className={`py-3 px-4 text-right tabular-nums font-medium ${t.runningBalance < 0 ? 'text-red-500' : 'text-slate-700'}`}>
+                        {t.runningBalance < 0 ? '-' : ''}{fmt(Math.abs(t.runningBalance))}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 const ACCOUNT_ICONS: Record<string, React.ElementType> = {
@@ -40,6 +218,7 @@ const ACCOUNT_ICONS: Record<string, React.ElementType> = {
   credit: CreditCard,
   cash: Banknote,
   loan: Landmark,
+  investment: TrendingUp,
 }
 
 const ACCOUNT_LABELS: Record<string, string> = {
@@ -48,31 +227,35 @@ const ACCOUNT_LABELS: Record<string, string> = {
   credit: 'Credit Card',
   cash: 'Cash',
   loan: 'Loan',
+  investment: 'Investment',
 }
 
 const ACCOUNT_COLORS: Record<string, string> = {
-  checking: 'bg-blue-50 text-blue-600',
-  savings:  'bg-green-50 text-green-600',
-  credit:   'bg-red-50 text-red-500',
-  cash:     'bg-amber-50 text-amber-600',
-  loan:     'bg-orange-50 text-orange-600',
+  checking:   'bg-blue-50 text-blue-600',
+  savings:    'bg-green-50 text-green-600',
+  credit:     'bg-red-50 text-red-500',
+  cash:       'bg-amber-50 text-amber-600',
+  loan:       'bg-orange-50 text-orange-600',
+  investment: 'bg-purple-50 text-purple-600',
 }
 
 const ACCOUNT_GROUPS = [
-  { key: 'debit',   label: 'Checking & Cash', types: ['checking', 'cash'],  isDebt: false },
-  { key: 'savings', label: 'Savings',          types: ['savings'],           isDebt: false },
-  { key: 'credit',  label: 'Credit Cards',     types: ['credit'],            isDebt: true  },
-  { key: 'loans',   label: 'Loans',            types: ['loan'],              isDebt: true  },
+  { key: 'debit',      label: 'Checking & Cash', types: ['checking', 'cash'],  isDebt: false },
+  { key: 'savings',    label: 'Savings',          types: ['savings'],           isDebt: false },
+  { key: 'investment', label: 'Investments',       types: ['investment'],        isDebt: false },
+  { key: 'credit',     label: 'Credit Cards',      types: ['credit'],            isDebt: true  },
+  { key: 'loans',      label: 'Loans',             types: ['loan'],              isDebt: true  },
 ] as const
 
 interface SortableAccountRowProps {
   account: Account
   onEdit: (a: Account) => void
   onDelete: (id: string) => void
+  onViewStatement: (id: string) => void
   deleting: string | null
 }
 
-function SortableAccountRow({ account, onEdit, onDelete, deleting }: SortableAccountRowProps) {
+function SortableAccountRow({ account, onEdit, onDelete, onViewStatement, deleting }: SortableAccountRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: account.id })
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -87,14 +270,20 @@ function SortableAccountRow({ account, onEdit, onDelete, deleting }: SortableAcc
   const isPaidOff = isDebt && !isNegative
   const balanceColor = isNegative ? 'text-red-500' : 'text-slate-400'
 
+  const showUtilization = account.type === 'credit' && account.credit_limit !== null
+  const utilized = showUtilization ? Math.abs(Math.min(account.balance, 0)) : 0
+  const utilizationPct = showUtilization ? Math.min((utilized / account.credit_limit!) * 100, 100) : 0
+  const utilizationColor = utilizationPct >= 90 ? '#ef4444' : utilizationPct >= 70 ? '#f97316' : '#22c55e'
+
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`bg-white rounded-xl border p-5 flex items-center justify-between transition-opacity ${
+      className={`bg-white rounded-xl border transition-opacity overflow-hidden ${
         isPaidOff ? 'border-slate-100 opacity-50' : 'border-slate-200'
       }`}
     >
+      <div className="p-5 flex items-center justify-between">
       <div className="flex items-center gap-3">
         {/* Drag handle */}
         <button
@@ -136,13 +325,13 @@ function SortableAccountRow({ account, onEdit, onDelete, deleting }: SortableAcc
           )}
         </div>
         <div className="flex items-center gap-3">
-          <Link
-            href={`/accounts/${account.id}`}
+          <button
+            onClick={() => onViewStatement(account.id)}
             className="text-slate-300 hover:text-slate-600 transition-colors"
             title="View statement"
           >
             <FileText className="w-4 h-4" />
-          </Link>
+          </button>
           <button
             onClick={() => onEdit(account)}
             className="text-slate-300 hover:text-slate-600 transition-colors"
@@ -159,6 +348,19 @@ function SortableAccountRow({ account, onEdit, onDelete, deleting }: SortableAcc
           </button>
         </div>
       </div>
+      </div>
+
+      {showUtilization && (
+        <div className="px-5 pb-4">
+          <div className="flex items-center justify-between text-xs mb-1.5">
+            <span className="text-slate-400">{fmt(utilized)} <span className="text-slate-300">/</span> {fmt(account.credit_limit!)} limit</span>
+            <span className="font-medium" style={{ color: utilizationColor }}>{utilizationPct.toFixed(0)}% utilized</span>
+          </div>
+          <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+            <div className="h-full rounded-full transition-all" style={{ width: `${utilizationPct}%`, backgroundColor: utilizationColor }} />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -171,10 +373,11 @@ interface AccountGroupProps {
   onReorder: (types: readonly string[], newIds: string[]) => void
   onEdit: (a: Account) => void
   onDelete: (id: string) => void
+  onViewStatement: (id: string) => void
   deleting: string | null
 }
 
-function AccountGroup({ group, accounts, onReorder, onEdit, onDelete, deleting }: AccountGroupProps) {
+function AccountGroup({ group, accounts, onReorder, onEdit, onDelete, onViewStatement, deleting }: AccountGroupProps) {
   const [collapsed, setCollapsed] = useState(false)
   const groupSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -231,6 +434,7 @@ function AccountGroup({ group, accounts, onReorder, onEdit, onDelete, deleting }
                   account={account}
                   onEdit={onEdit}
                   onDelete={onDelete}
+                  onViewStatement={onViewStatement}
                   deleting={deleting}
                 />
               ))}
@@ -247,14 +451,16 @@ export default function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [statementAccountId, setStatementAccountId] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
 
   // Form state
   const [formName, setFormName] = useState('')
-  const [formType, setFormType] = useState<'checking' | 'savings' | 'credit' | 'cash' | 'loan'>('checking')
+  const [formType, setFormType] = useState<'checking' | 'savings' | 'credit' | 'cash' | 'loan' | 'investment'>('checking')
   const [formBalance, setFormBalance] = useState('')
   const [formApr, setFormApr] = useState('')
+  const [formCreditLimit, setFormCreditLimit] = useState('')
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -315,6 +521,7 @@ export default function AccountsPage() {
     const isDebt = account.type === 'credit' || account.type === 'loan'
     setFormBalance(isDebt ? Math.abs(account.opening_balance).toFixed(2) : account.opening_balance.toFixed(2))
     setFormApr(account.apr !== null ? String(account.apr) : '')
+    setFormCreditLimit(account.credit_limit !== null ? String(account.credit_limit) : '')
     setFormError('')
     setShowForm(true)
   }
@@ -331,8 +538,8 @@ export default function AccountsPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(
         isEdit
-          ? { id: editingAccount.id, name: formName, type: formType, opening_balance: bal, apr: formApr || null }
-          : { name: formName, type: formType, opening_balance: bal, apr: formApr || null }
+          ? { id: editingAccount.id, name: formName, type: formType, opening_balance: bal, apr: formApr || null, credit_limit: formCreditLimit || null }
+          : { name: formName, type: formType, opening_balance: bal, apr: formApr || null, credit_limit: formCreditLimit || null }
       ),
     })
     setSaving(false)
@@ -346,6 +553,7 @@ export default function AccountsPage() {
     setFormType('checking')
     setFormBalance('')
     setFormApr('')
+    setFormCreditLimit('')
     setEditingAccount(null)
     setShowForm(false)
     load()
@@ -420,11 +628,19 @@ export default function AccountsPage() {
               onReorder={handleGroupReorder}
               onEdit={openEdit}
               onDelete={handleDelete}
+              onViewStatement={setStatementAccountId}
               deleting={deleting}
             />
           ))}
         </div>
       )}
+
+      {/* Statement Modal */}
+      <StatementModal
+        accountId={statementAccountId}
+        accounts={accounts}
+        onClose={() => setStatementAccountId(null)}
+      />
 
       {/* Add Account Modal */}
       {showForm && (
@@ -455,7 +671,7 @@ export default function AccountsPage() {
               <div>
                 <label className="block text-xs text-slate-500 mb-1">Account Type</label>
                 <div className="grid grid-cols-2 gap-2">
-                  {(['checking', 'savings', 'credit', 'cash', 'loan'] as const).map(t => {
+                  {(['checking', 'savings', 'credit', 'cash', 'loan', 'investment'] as const).map(t => {
                     const Icon = ACCOUNT_ICONS[t]
                     return (
                       <button
@@ -517,6 +733,27 @@ export default function AccountsPage() {
                   </div>
                   <p className="text-xs text-slate-400 mt-1">
                     Used to estimate monthly interest cost. Leave blank if unknown.
+                  </p>
+                </div>
+              )}
+
+              {formType === 'credit' && (
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Credit Limit (optional)</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="e.g. 5000.00"
+                      value={formCreditLimit}
+                      onChange={e => setFormCreditLimit(e.target.value)}
+                      className="w-full pl-7 pr-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+                    />
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Shows a utilization bar on the account card.
                   </p>
                 </div>
               )}

@@ -54,6 +54,10 @@ function initSchema(db: Database.Database): void {
   migrateToV6(db)
   migrateToV7(db)
   migrateToV8(db)
+  migrateToV9(db)
+  migrateToV10(db)
+  migrateToV11(db)
+  migrateToV12(db)
 
   // Seed default categories
   seedCategories(db)
@@ -306,6 +310,211 @@ function migrateToV8(db: Database.Database): void {
   }
 
   db.pragma('user_version = 8')
+}
+
+/**
+ * Migration v9: add credit_limit_enc to accounts for credit cards.
+ */
+function migrateToV9(db: Database.Database): void {
+  const version = db.pragma('user_version', { simple: true }) as number
+  if (version >= 9) return
+
+  const cols = db.pragma('table_info(accounts)') as { name: string }[]
+  if (!cols.some(c => c.name === 'credit_limit_enc')) {
+    db.prepare('ALTER TABLE accounts ADD COLUMN credit_limit_enc TEXT').run()
+  }
+
+  db.pragma('user_version = 9')
+}
+
+/**
+ * Migration v10: expand account type CHECK to include 'investment';
+ * create net_worth_snapshots table.
+ *
+ * IMPORTANT — uses the official SQLite "safe table rebuild" pattern from
+ * https://sqlite.org/lang_altertable.html#otheralter (steps 1–12).
+ *
+ * The OLD (buggy) version of this migration used `ALTER TABLE accounts
+ * RENAME TO _accounts_v9` first, which (since SQLite 3.25) auto-updates
+ * foreign-key references in OTHER tables to point at the new (temp) name.
+ * Dropping the temp table then triggered ON DELETE SET NULL across
+ * transactions, forecast_plans, and recurring_templates — wiping every
+ * account_id link. Never rename a table that is the TARGET of foreign
+ * keys in other tables. Always use the new-temp-then-drop-old pattern.
+ */
+function migrateToV10(db: Database.Database): void {
+  const version = db.pragma('user_version', { simple: true }) as number
+  if (version >= 10) return
+
+  const schema = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='accounts'")
+    .get() as { sql: string } | undefined
+
+  if (schema && !schema.sql.includes("'investment'")) {
+    // Step 1: disable FK enforcement during the rebuild
+    const fkWasOn = (db.pragma('foreign_keys', { simple: true }) as number) === 1
+    db.pragma('foreign_keys = OFF')
+
+    try {
+      db.transaction(() => {
+        // Step 4: create the new table with the desired schema, under a TEMP name
+        db.prepare(`
+          CREATE TABLE _accounts_new (
+            id                  TEXT PRIMARY KEY,
+            name_enc            TEXT NOT NULL,
+            type                TEXT NOT NULL CHECK (type IN ('checking','savings','credit','cash','loan','investment')),
+            opening_balance_enc TEXT NOT NULL,
+            apr_enc             TEXT,
+            sort_order          INTEGER NOT NULL DEFAULT 0,
+            credit_limit_enc    TEXT,
+            created_at          TEXT NOT NULL DEFAULT (datetime('now'))
+          )
+        `).run()
+
+        // Step 5: copy data from the old table into the new one
+        db.prepare(`
+          INSERT INTO _accounts_new (id, name_enc, type, opening_balance_enc, apr_enc, sort_order, credit_limit_enc, created_at)
+          SELECT id, name_enc, type, opening_balance_enc, apr_enc, sort_order, credit_limit_enc, created_at
+          FROM accounts
+        `).run()
+
+        // Step 6: drop the old table — FKs in other tables now reference
+        //         a non-existent table briefly, but FK enforcement is OFF
+        db.prepare('DROP TABLE accounts').run()
+
+        // Step 7: rename the new table to the original name
+        //         FK references in other tables are auto-updated to point at the new "accounts"
+        db.prepare('ALTER TABLE _accounts_new RENAME TO accounts').run()
+
+        // Step 10: verify schema integrity (raises if anything is broken)
+        const fkErrors = db.pragma('foreign_key_check') as unknown[]
+        if (fkErrors.length > 0) {
+          throw new Error(`v10 FK check failed: ${JSON.stringify(fkErrors)}`)
+        }
+      })()
+    } finally {
+      // Step 12: restore FK enforcement
+      if (fkWasOn) db.pragma('foreign_keys = ON')
+    }
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS net_worth_snapshots (
+      id         TEXT PRIMARY KEY,
+      month      TEXT NOT NULL UNIQUE,
+      amount_enc TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `)
+
+  db.pragma('user_version = 10')
+}
+
+/**
+ * Migration v11: create credit_score_history and pay_in_full_log tables.
+ */
+function migrateToV11(db: Database.Database): void {
+  const version = db.pragma('user_version', { simple: true }) as number
+  if (version >= 11) return
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS credit_score_history (
+      id         TEXT PRIMARY KEY,
+      score      INTEGER NOT NULL,
+      date       TEXT NOT NULL,
+      notes_enc  TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS pay_in_full_log (
+      id         TEXT PRIMARY KEY,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      month      TEXT NOT NULL,
+      paid       INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(account_id, month)
+    )
+  `)
+
+  db.pragma('user_version = 11')
+}
+
+/**
+ * Migration v12: defensive repair migration.
+ *
+ * Detects any tables whose FK references point at the (no-longer-existing)
+ * leftover `_accounts_v9` shadow table — a corruption caused by the old
+ * buggy v10 migration — and rebuilds those tables so their FKs correctly
+ * reference `accounts(id)` again.
+ *
+ * On a clean DB this is a no-op. On a DB that was damaged by old v10,
+ * this restores schema integrity. Row data is preserved as-is (any
+ * already-NULLed account_ids remain NULL — those rows were lost when the
+ * old v10 dropped the renamed table; this migration only fixes the schema
+ * so future writes succeed).
+ *
+ * Uses the safe rebuild pattern: create new → copy → drop old → rename.
+ */
+function migrateToV12(db: Database.Database): void {
+  const version = db.pragma('user_version', { simple: true }) as number
+  if (version >= 12) return
+
+  // Find any tables whose CREATE statement references the orphaned shadow table
+  const damaged = db
+    .prepare(
+      `SELECT name, sql FROM sqlite_master
+       WHERE type = 'table'
+         AND sql LIKE '%_accounts_v9%'`,
+    )
+    .all() as { name: string; sql: string }[]
+
+  if (damaged.length > 0) {
+    const fkWasOn = (db.pragma('foreign_keys', { simple: true }) as number) === 1
+    db.pragma('foreign_keys = OFF')
+
+    try {
+      db.transaction(() => {
+        for (const tbl of damaged) {
+          // Replace the bad reference with the correct one
+          const fixedSql = tbl.sql
+            .replaceAll(/"_accounts_v9"/g, 'accounts')
+            .replaceAll(/`_accounts_v9`/g, 'accounts')
+            .replaceAll(/\b_accounts_v9\b/g, 'accounts')
+
+          // Build a CREATE TABLE for a temp copy with the fixed schema
+          const tempSql = fixedSql.replace(
+            new RegExp(`CREATE TABLE\\s+["\`]?${tbl.name}["\`]?`, 'i'),
+            `CREATE TABLE _${tbl.name}_repair`,
+          )
+
+          // Get the column list so we can copy data exactly
+          const cols = (
+            db.prepare(`PRAGMA table_info(${tbl.name})`).all() as { name: string }[]
+          )
+            .map((c) => `"${c.name}"`)
+            .join(', ')
+
+          db.prepare(tempSql).run()
+          db.prepare(
+            `INSERT INTO _${tbl.name}_repair (${cols}) SELECT ${cols} FROM "${tbl.name}"`,
+          ).run()
+          db.prepare(`DROP TABLE "${tbl.name}"`).run()
+          db.prepare(`ALTER TABLE _${tbl.name}_repair RENAME TO "${tbl.name}"`).run()
+        }
+
+        const fkErrors = db.pragma('foreign_key_check') as unknown[]
+        if (fkErrors.length > 0) {
+          throw new Error(`v12 FK check failed: ${JSON.stringify(fkErrors)}`)
+        }
+      })()
+    } finally {
+      if (fkWasOn) db.pragma('foreign_keys = ON')
+    }
+  }
+
+  // Also clean up the orphan shadow table itself if it somehow still exists
+  db.exec('DROP TABLE IF EXISTS _accounts_v9')
+
+  db.pragma('user_version = 12')
 }
 
 function seedCategories(db: Database.Database): void {

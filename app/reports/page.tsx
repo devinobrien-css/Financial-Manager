@@ -15,9 +15,16 @@ interface Transaction {
   memo: string | null
   category_name: string | null
   category_color: string | null
+  account_id: string | null
   account_name: string | null
+  to_account_id: string | null
   to_account_name: string | null
   date: string
+}
+
+interface Account {
+  id: string
+  type: string
 }
 
 function fmt(n: number) {
@@ -34,7 +41,7 @@ export default function ReportsPage() {
   const { lock } = useAuth()
   const [year, setYear] = useState(new Date().getFullYear())
   const [monthlyData, setMonthlyData] = useState<Array<{
-    month: string; label: string; income: number; expenses: number; savings: number
+    month: string; label: string; income: number; expenses: number; savings: number; debtPaid: number
   }>>([])
   const [allTx, setAllTx] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(false)
@@ -42,6 +49,14 @@ export default function ReportsPage() {
   const loadYear = useCallback(async (y: number) => {
     setLoading(true)
     const months = Array.from({ length: 12 }, (_, i) => toMonthString(y, i + 1))
+    const acRes = await fetch('/api/accounts')
+    if (acRes.status === 401) { lock(); setLoading(false); return }
+    const accounts = acRes.ok ? (await acRes.json()) as Account[] : []
+    const savingsPoolIds = new Set(
+      accounts.filter(a => a.type === 'checking' || a.type === 'savings' || a.type === 'investment').map(a => a.id),
+    )
+    const debtAcctIds = new Set(accounts.filter(a => a.type === 'credit' || a.type === 'loan').map(a => a.id))
+
     const results = await Promise.all(
       months.map(m =>
         fetch(`/api/transactions?month=${m}`).then(r => {
@@ -53,7 +68,15 @@ export default function ReportsPage() {
     const monthly = results.map((txs, i) => {
       const income = txs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
       const expenses = txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
-      return { month: months[i], label: SHORT_MONTHS[i], income, expenses, savings: income - expenses }
+      // Outflow from savings pool (checking/savings/investment) to credit or loan = debt paydown.
+      const debtPaid = txs
+        .filter(t => t.type === 'transfer'
+          && t.account_id && savingsPoolIds.has(t.account_id)
+          && t.to_account_id && debtAcctIds.has(t.to_account_id))
+        .reduce((s, t) => s + t.amount, 0)
+      // "Saved" = money that ended up in (or stayed in) the savings pool.
+      const savings = income - expenses - debtPaid
+      return { month: months[i], label: SHORT_MONTHS[i], income, expenses, savings, debtPaid }
     })
     setMonthlyData(monthly)
     setAllTx(results.flat())
@@ -64,13 +87,18 @@ export default function ReportsPage() {
 
   const annualIncome = monthlyData.reduce((s, m) => s + m.income, 0)
   const annualExpenses = monthlyData.reduce((s, m) => s + m.expenses, 0)
-  const annualNet = annualIncome - annualExpenses
+  const annualDebtPaid = monthlyData.reduce((s, m) => s + m.debtPaid, 0)
+  const annualNet = annualIncome - annualExpenses - annualDebtPaid
   const avgMonthlySavings = annualNet / 12
 
-  const bestMonth = monthlyData.reduce<(typeof monthlyData[0]) | null>((best, m) =>
-    m.savings > (best?.savings ?? -Infinity) ? m : best, null)
-  const worstMonth = monthlyData.reduce<(typeof monthlyData[0]) | null>((worst, m) =>
-    m.savings < (worst?.savings ?? Infinity) ? m : worst, null)
+  const bestMonth = monthlyData
+    .filter(m => m.savings > 0)
+    .reduce<(typeof monthlyData[0]) | null>((best, m) =>
+      m.savings > (best?.savings ?? -Infinity) ? m : best, null)
+  const worstMonth = monthlyData
+    .filter(m => m.expenses > 0)
+    .reduce<(typeof monthlyData[0]) | null>((worst, m) =>
+      m.expenses > (worst?.expenses ?? -Infinity) ? m : worst, null)
 
   // Category breakdown for the full year
   const catTotals = Object.values(
@@ -148,7 +176,7 @@ export default function ReportsPage() {
       ) : (
         <>
           {/* Annual summary cards */}
-          <div className="grid grid-cols-4 gap-4 mb-8">
+          <div className="grid grid-cols-5 gap-4 mb-8">
             <div className="bg-white rounded-xl border border-slate-200 p-5">
               <p className="text-xs text-slate-500 mb-1">Annual Income</p>
               <p className="text-2xl font-semibold text-green-600 tabular-nums">{fmt(annualIncome)}</p>
@@ -156,6 +184,10 @@ export default function ReportsPage() {
             <div className="bg-white rounded-xl border border-slate-200 p-5">
               <p className="text-xs text-slate-500 mb-1">Annual Expenses</p>
               <p className="text-2xl font-semibold text-red-500 tabular-nums">{fmt(annualExpenses)}</p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-5">
+              <p className="text-xs text-slate-500 mb-1">Debt Paid Down</p>
+              <p className="text-2xl font-semibold text-blue-600 tabular-nums">{fmt(annualDebtPaid)}</p>
             </div>
             <div className="bg-white rounded-xl border border-slate-200 p-5">
               <p className="text-xs text-slate-500 mb-1">Net Saved</p>
@@ -198,13 +230,15 @@ export default function ReportsPage() {
                 <Tooltip formatter={(v: number) => fmt(v)} />
                 <Bar dataKey="income" fill="#bbf7d0" name="Income" radius={[3, 3, 0, 0]} />
                 <Bar dataKey="expenses" fill="#fecaca" name="Expenses" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="debtPaid" fill="#bfdbfe" name="Debt Paydown" radius={[3, 3, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
+            <p className="text-xs text-slate-400 mt-2">Debt paydown = transfers from checking/savings/investment to credit or loan accounts.</p>
           </div>
 
           {/* Monthly net chart */}
           <div className="bg-white rounded-xl border border-slate-200 p-5 mb-6">
-            <h3 className="text-sm font-medium text-slate-700 mb-4">Monthly Net (Income − Expenses)</h3>
+            <h3 className="text-sm font-medium text-slate-700 mb-4">Monthly Savings (Income − Expenses − Debt Paydown)</h3>
             <ResponsiveContainer width="100%" height={180}>
               <BarChart data={monthlyData} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
