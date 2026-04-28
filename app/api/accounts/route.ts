@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { getServerSession } from '@/lib/server-session'
 import { encrypt, decrypt } from '@/lib/crypto'
-import { requireSessionKey } from '@/lib/session'
 import { v4 as uuidv4 } from 'uuid'
-
 interface AccountRow {
   id: string
   name_enc: string
@@ -22,10 +20,9 @@ interface TxBalanceRow {
 }
 
 export async function GET() {
-  let key: Buffer
-  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
-
-  const db = getDb()
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { key, db } = session
   const accounts = db.prepare(
     'SELECT * FROM accounts ORDER BY sort_order ASC, created_at ASC'
   ).all() as AccountRow[]
@@ -76,8 +73,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  let key: Buffer
-  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { key, db } = session
 
   const body = await req.json()
   const { name, type, opening_balance, apr, credit_limit } = body
@@ -110,7 +108,6 @@ export async function POST(req: NextRequest) {
     if (!isNaN(lim) && lim > 0) creditLimitEnc = encrypt(lim.toFixed(2), key)
   }
 
-  const db = getDb()
   const id = uuidv4()
   db.prepare(
     'INSERT INTO accounts (id, name_enc, type, opening_balance_enc, apr_enc, credit_limit_enc) VALUES (?, ?, ?, ?, ?, ?)'
@@ -120,14 +117,14 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  let key: Buffer
-  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { key, db } = session
 
   const body = await req.json()
 
   // Reorder: { reorder: string[] } — array of account ids in new order
   if (Array.isArray(body.reorder)) {
-    const db = getDb()
     const update = db.prepare('UPDATE accounts SET sort_order = ? WHERE id = ?')
     db.transaction(() => {
       ;(body.reorder as string[]).forEach((id, i) => update.run(i, id))
@@ -142,7 +139,6 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'invalid account type' }, { status: 400 })
   }
 
-  const db = getDb()
   const existing = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id)
   if (!existing) return NextResponse.json({ error: 'account not found' }, { status: 404 })
 
@@ -199,12 +195,13 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  try { requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { db } = session
 
   const { id } = await req.json()
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
-  const db = getDb()
   db.prepare('DELETE FROM accounts WHERE id = ?').run(id)
   return NextResponse.json({ ok: true })
 }

@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { Plus, X, Trash2, CheckCircle2, Circle, Pencil, GripHorizontal } from 'lucide-react'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { useAuth } from '@/lib/auth-context'
 
 interface Goal {
@@ -194,6 +195,8 @@ export default function GoalsPage() {
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null)
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({})
   const [dragging, setDragging] = useState<{ id: string; ox: number; oy: number } | null>(null)
+  const [confirmGoal, setConfirmGoal] = useState<Goal | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const boardRef = useRef<HTMLDivElement>(null)
   const posInitialized = useRef(false)
 
@@ -269,9 +272,16 @@ export default function GoalsPage() {
   }
 
   const deleteGoal = async (id: string) => {
-    if (!confirm('Remove this goal?')) return
+    setDeleting(true)
     await fetch('/api/plans', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) })
+    setDeleting(false)
+    setConfirmGoal(null)
     loadGoals()
+  }
+
+  const requestDeleteGoal = (id: string) => {
+    const g = goals.find(x => x.id === id)
+    if (g) setConfirmGoal(g)
   }
 
   return (
@@ -321,7 +331,7 @@ export default function GoalsPage() {
                 onHandlePointerDown={e => handleDragStart(goal.id, e)}
                 onToggle={toggleGoalComplete}
                 onEdit={() => { setEditingGoal(goal); setShowGoalForm(true) }}
-                onDelete={deleteGoal}
+                onDelete={requestDeleteGoal}
               />
             )
           })
@@ -331,6 +341,16 @@ export default function GoalsPage() {
       {showGoalForm && (
         <GoalForm initial={editingGoal} onSave={handleGoalSave} onClose={() => { setShowGoalForm(false); setEditingGoal(null) }} />
       )}
+
+      <ConfirmDialog
+        open={confirmGoal !== null}
+        title="Remove this goal?"
+        message={confirmGoal ? <>This will permanently remove <strong>{confirmGoal.title}</strong>. This cannot be undone.</> : ''}
+        confirmLabel="Remove"
+        loading={deleting}
+        onConfirm={() => confirmGoal && deleteGoal(confirmGoal.id)}
+        onCancel={() => setConfirmGoal(null)}
+      />
     </div>
   )
 }

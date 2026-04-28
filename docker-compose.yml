@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      # Required: random secret used to sign session tokens
+      SESSION_SECRET: ${SESSION_SECRET}
+      # Optional: if set, new registrations must supply this code
+      # REGISTRATION_CODE: ${REGISTRATION_CODE}

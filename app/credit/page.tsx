@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { Plus, Trash2, CheckCircle, Circle, AlertTriangle, TrendingUp, CreditCard, ShieldCheck, X } from 'lucide-react'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   ReferenceLine,
@@ -86,6 +87,8 @@ export default function CreditPage() {
   const [newDate, setNewDate] = useState(new Date().toISOString().slice(0, 10))
   const [newNotes, setNewNotes] = useState('')
   const [savingScore, setSavingScore] = useState(false)
+  const [confirmScore, setConfirmScore] = useState<CreditScoreEntry | null>(null)
+  const [deletingScore, setDeletingScore] = useState(false)
 
   // Pay-in-full months to show
   const today = new Date()
@@ -144,12 +147,15 @@ export default function CreditPage() {
   }
 
   const handleDeleteScore = async (id: string) => {
+    setDeletingScore(true)
     await fetch('/api/credit-score', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id }),
     })
     setScores(prev => prev.filter(s => s.id !== id))
+    setDeletingScore(false)
+    setConfirmScore(null)
   }
 
   const handleTogglePayInFull = async (accountId: string, month: string, currentPaid: boolean) => {
@@ -322,7 +328,7 @@ export default function CreditPage() {
                   <span className={`font-medium tabular-nums ${scoreColor(s.score)}`}>{s.score}</span>
                   <span className="text-slate-400">{scoreBand(s.score)}</span>
                   {s.notes && <span className="text-slate-400 truncate max-w-24">{s.notes}</span>}
-                  <button onClick={() => handleDeleteScore(s.id)} className="text-slate-300 hover:text-red-400 ml-1">
+                  <button onClick={() => setConfirmScore(s)} className="text-slate-300 hover:text-red-400 ml-1">
                     <Trash2 className="w-3 h-3" />
                   </button>
                 </div>
@@ -559,6 +565,16 @@ export default function CreditPage() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmScore !== null}
+        title="Delete credit score entry?"
+        message={confirmScore ? <>This will remove your score of <strong>{confirmScore.score}</strong> from {confirmScore.date}. This cannot be undone.</> : ''}
+        confirmLabel="Delete"
+        loading={deletingScore}
+        onConfirm={() => confirmScore && handleDeleteScore(confirmScore.id)}
+        onCancel={() => setConfirmScore(null)}
+      />
     </div>
   )
 }

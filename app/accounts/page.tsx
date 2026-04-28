@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { Plus, Trash2, X, Wallet, CreditCard, Banknote, PiggyBank, Landmark, Pencil, GripVertical, ChevronDown, FileText, ArrowRight, TrendingUp } from 'lucide-react'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { useAuth } from '@/lib/auth-context'
 import {
   DndContext,
@@ -451,6 +452,7 @@ export default function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [confirmAccount, setConfirmAccount] = useState<Account | null>(null)
   const [statementAccountId, setStatementAccountId] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
@@ -560,7 +562,6 @@ export default function AccountsPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this account? Transactions linked to it will become unlinked.')) return
     setDeleting(id)
     await fetch('/api/accounts', {
       method: 'DELETE',
@@ -568,7 +569,13 @@ export default function AccountsPage() {
       body: JSON.stringify({ id }),
     })
     setDeleting(null)
+    setConfirmAccount(null)
     load()
+  }
+
+  const requestDelete = (id: string) => {
+    const a = accounts.find(x => x.id === id)
+    if (a) setConfirmAccount(a)
   }
 
   return (
@@ -627,7 +634,7 @@ export default function AccountsPage() {
               accounts={accounts}
               onReorder={handleGroupReorder}
               onEdit={openEdit}
-              onDelete={handleDelete}
+              onDelete={requestDelete}
               onViewStatement={setStatementAccountId}
               deleting={deleting}
             />
@@ -780,6 +787,16 @@ export default function AccountsPage() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmAccount !== null}
+        title="Delete account?"
+        message={confirmAccount ? <>This will permanently delete <strong>{confirmAccount.name}</strong>. Transactions linked to it will become unlinked. This cannot be undone.</> : ''}
+        confirmLabel="Delete"
+        loading={deleting !== null}
+        onConfirm={() => confirmAccount && handleDelete(confirmAccount.id)}
+        onCancel={() => setConfirmAccount(null)}
+      />
     </div>
   )
 }

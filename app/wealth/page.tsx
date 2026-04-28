@@ -28,6 +28,7 @@ interface Transaction {
   type: 'income' | 'expense' | 'transfer'
   amount: number
   date: string
+  account_id?: string | null
   to_account_id?: string | null
 }
 

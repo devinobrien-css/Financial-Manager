@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { getServerSession } from '@/lib/server-session'
 import { encrypt, decrypt } from '@/lib/crypto'
-import { requireSessionKey } from '@/lib/session'
 import { v4 as uuidv4 } from 'uuid'
-
 interface GoalRow {
   id: string
   title_enc: string
@@ -31,22 +29,21 @@ function decryptGoal(row: GoalRow, key: Buffer) {
 }
 
 export async function GET() {
-  let key: Buffer
-  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
-
-  const db = getDb()
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { key, db } = session
   const rows = db.prepare('SELECT * FROM goals ORDER BY completed ASC, created_at DESC').all() as GoalRow[]
   return NextResponse.json(rows.map(r => decryptGoal(r, key)))
 }
 
 export async function POST(req: NextRequest) {
-  let key: Buffer
-  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { key, db } = session
 
   const { title, notes, target_amount, saved_amount, target_date, color } = await req.json()
   if (!title?.trim()) return NextResponse.json({ error: 'Title is required' }, { status: 400 })
 
-  const db = getDb()
   db.prepare(`
     INSERT INTO goals (id, title_enc, notes_enc, amount_enc, saved_amount_enc, target_date, color)
     VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -64,14 +61,14 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  let key: Buffer
-  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { key, db } = session
 
   const body = await req.json()
   const { id, title, notes, target_amount, saved_amount, target_date, completed, color } = body
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
-  const db = getDb()
   const row = db.prepare('SELECT * FROM goals WHERE id = ?').get(id) as GoalRow | undefined
   if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
@@ -115,12 +112,13 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  let key: Buffer
-  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { key, db } = session
 
   const { id } = await req.json()
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
-  getDb().prepare('DELETE FROM goals WHERE id = ?').run(id)
+  db.prepare('DELETE FROM goals WHERE id = ?').run(id)
   return NextResponse.json({ ok: true })
 }

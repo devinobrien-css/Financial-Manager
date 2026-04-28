@@ -6,30 +6,34 @@ import { usePathname } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
 import { LockKeyhole, LayoutDashboard, ListOrdered, LogOut, Wallet, Target, Flag, BarChart2, Sun, Moon, TrendingUp, ShieldCheck } from 'lucide-react'
 
-function LockScreen() {
-  const { state, unlock, setup } = useAuth()
+function LoginScreen() {
+  const { login, register } = useAuth()
+  const [mode, setMode] = useState<'login' | 'register'>('login')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [registrationCode, setRegistrationCode] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-
-  const isSetup = state === 'needs-setup'
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
-    if (isSetup && password !== confirmPassword) {
-      setError('Passwords do not match')
-      return
-    }
-    if (isSetup && password.length < 8) {
-      setError('Password must be at least 8 characters')
-      return
+    if (!username.trim()) { setError('Username is required'); return }
+    if (mode === 'register') {
+      if (password !== confirmPassword) { setError('Passwords do not match'); return }
+      if (password.length < 8) { setError('Password must be at least 8 characters'); return }
     }
     setLoading(true)
-    const err = isSetup ? await setup(password) : await unlock(password)
+    const err = mode === 'register'
+      ? await register(username, password, registrationCode || undefined)
+      : await login(username, password)
     setLoading(false)
     if (err) setError(err)
+  }
+
+  const switchMode = (next: 'login' | 'register') => {
+    setMode(next); setError(''); setPassword(''); setConfirmPassword('')
   }
 
   return (
@@ -40,31 +44,57 @@ function LockScreen() {
             <LockKeyhole className="w-8 h-8 text-slate-600" />
           </div>
         </div>
-        <h1 className="text-xl font-semibold text-center text-slate-800 mb-1">
-          {isSetup ? 'Create Your Password' : 'Unlock Financial Manager'}
-        </h1>
+        <h1 className="text-xl font-semibold text-center text-slate-800 mb-1">Financial Manager</h1>
         <p className="text-sm text-slate-500 text-center mb-6">
-          {isSetup
-            ? 'Your password encrypts all financial data locally.'
-            : 'Enter your password to decrypt and access your data.'}
+          {mode === 'login' ? 'Sign in to access your encrypted data.' : 'Create an account. All data is encrypted with your password.'}
         </p>
-        <form onSubmit={handleSubmit} className="space-y-4">
+
+        {/* Mode tabs */}
+        <div className="flex rounded-lg bg-slate-100 p-0.5 mb-5">
+          {(['login', 'register'] as const).map(m => (
+            <button key={m} type="button" onClick={() => switchMode(m)}
+              className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors ${
+                mode === m ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}>
+              {m === 'login' ? 'Sign In' : 'Create Account'}
+            </button>
+          ))}
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <input
+            type="text"
+            placeholder="Username"
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+            autoFocus
+            autoCapitalize="none"
+          />
           <input
             type="password"
             placeholder="Password"
             value={password}
             onChange={e => setPassword(e.target.value)}
             className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
-            autoFocus
           />
-          {isSetup && (
-            <input
-              type="password"
-              placeholder="Confirm password"
-              value={confirmPassword}
-              onChange={e => setConfirmPassword(e.target.value)}
-              className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
-            />
+          {mode === 'register' && (
+            <>
+              <input
+                type="password"
+                placeholder="Confirm password"
+                value={confirmPassword}
+                onChange={e => setConfirmPassword(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+              />
+              <input
+                type="text"
+                placeholder="Registration code (if required)"
+                value={registrationCode}
+                onChange={e => setRegistrationCode(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
+              />
+            </>
           )}
           {error && <p className="text-red-500 text-sm">{error}</p>}
           <button
@@ -72,7 +102,7 @@ function LockScreen() {
             disabled={loading}
             className="w-full bg-slate-800 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-slate-700 disabled:opacity-50 transition-colors"
           >
-            {loading ? 'Working…' : isSetup ? 'Set Password & Enter' : 'Unlock'}
+            {loading ? 'Working…' : mode === 'login' ? 'Sign In' : 'Create Account & Enter'}
           </button>
         </form>
       </div>
@@ -112,7 +142,7 @@ const navGroups = [
 ]
 
 export function AppShell({ children }: { children: ReactNode }) {
-  const { state, lock } = useAuth()
+  const { state, username, lock } = useAuth()
   const pathname = usePathname()
   const [darkMode, setDarkMode] = useState(false)
 
@@ -138,8 +168,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     )
   }
 
-  if (state === 'needs-setup' || state === 'locked') {
-    return <LockScreen />
+  if (state === 'needs-login') {
+    return <LoginScreen />
   }
 
   return (
@@ -148,7 +178,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <aside className="fixed top-0 left-0 h-screen w-56 bg-slate-900 text-slate-300 flex flex-col py-6 px-4 pb-14 z-40">
         <div className="mb-8 px-2">
           <h1 className="text-white font-semibold text-base">Finance</h1>
-          <p className="text-slate-500 text-xs mt-0.5">Local · Encrypted</p>
+          <p className="text-slate-500 text-xs mt-0.5">{username ?? 'Loading…'}</p>
         </div>
         <nav className="flex-1 space-y-5">
           {navGroups.map(({ label, items }) => (
@@ -188,7 +218,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-slate-800 hover:text-white transition-colors mt-2"
         >
           <LogOut className="w-4 h-4" />
-          Lock
+          Sign Out
         </button>
       </aside>
 

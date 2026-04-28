@@ -1,0 +1,21 @@
+# Copy this file to terraform.tfvars and fill in your values.
+# Never commit terraform.tfvars — it contains secrets.
+
+tenancy_ocid        = "ocid1.tenancy.oc1..xxxxx"
+user_ocid           = "ocid1.user.oc1..xxxxx"
+fingerprint         = "xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx:xx"
+private_key_path    = "~/.oci/oci_api_key.pem"
+region              = "us-ashburn-1"
+
+compartment_ocid    = "ocid1.tenancy.oc1..xxxxx"   # root compartment = tenancy_ocid
+availability_domain = "IWjO:US-ASHBURN-AD-1"       # get from OCI console
+
+ssh_public_key_path = "~/.ssh/id_rsa.pub"
+
+# Generate with: openssl rand -hex 32
+session_secret      = "replace-with-a-long-random-secret"
+
+# Optional: leave blank to allow open registration
+registration_code   = ""
+
+repo_url            = "https://github.com/YOUR_USERNAME/Financial-Manager.git"

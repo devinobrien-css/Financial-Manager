@@ -1,9 +1,11 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
-import { createPortal } from 'react-dom'
-import { Plus, Trash2, ChevronLeft, ChevronRight, X, ArrowRight, ChevronDown, Check, Wallet, CreditCard, Banknote, PiggyBank, Landmark, Pencil, Search, RefreshCw, ChevronUp } from 'lucide-react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
+import { Plus, Trash2, ChevronLeft, ChevronRight, X, ArrowRight, ChevronDown, Wallet, CreditCard, Banknote, PiggyBank, Landmark, Pencil, Search, RefreshCw, ChevronUp } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { CustomSelect } from '@/components/CustomSelect'
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 
 interface Category {
   id: number
@@ -82,119 +84,6 @@ function fmt(n: number) {
 
 const today = () => new Date().toISOString().slice(0, 10)
 
-type SelectOption = {
-  value: string
-  label: string
-  sublabel?: string
-  color?: string
-  icon?: React.ElementType
-}
-
-function CustomSelect({
-  value,
-  onChange,
-  options,
-  placeholder = '— Select —',
-}: {
-  value: string
-  onChange: (val: string) => void
-  options: SelectOption[]
-  placeholder?: string
-}) {
-  const [open, setOpen] = useState(false)
-  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({})
-  const triggerRef = useRef<HTMLButtonElement>(null)
-  const dropdownRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (
-        triggerRef.current && !triggerRef.current.contains(e.target as Node) &&
-        dropdownRef.current && !dropdownRef.current.contains(e.target as Node)
-      ) setOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
-
-  const handleOpen = () => {
-    if (!triggerRef.current) return
-    const rect = triggerRef.current.getBoundingClientRect()
-    const spaceBelow = window.innerHeight - rect.bottom
-    const dropdownHeight = Math.min(options.length * 52 + 8, 224)
-    const openUpward = spaceBelow < dropdownHeight && rect.top > dropdownHeight
-    setDropdownStyle({
-      position: 'fixed',
-      top: openUpward ? rect.top - dropdownHeight - 4 : rect.bottom + 4,
-      left: rect.left,
-      width: rect.width,
-      zIndex: 9999,
-    })
-    setOpen(o => !o)
-  }
-
-  const selected = options.find(o => o.value === value)
-
-  return (
-    <div className="relative">
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={handleOpen}
-        className="w-full flex items-center justify-between px-3 py-2.5 rounded-lg border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-300"
-      >
-        <span className="flex items-center gap-2 min-w-0">
-          {selected?.color && (
-            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: selected.color }} />
-          )}
-          {selected?.icon && (() => { const Icon = selected.icon!; return <Icon className="w-4 h-4 text-slate-400 flex-shrink-0" /> })()}
-          <span className={`truncate ${selected ? 'text-slate-800' : 'text-slate-400'}`}>
-            {selected ? selected.label : placeholder}
-          </span>
-          {selected?.sublabel && (
-            <span className="text-slate-400 text-xs flex-shrink-0">{selected.sublabel}</span>
-          )}
-        </span>
-        <ChevronDown className={`w-4 h-4 text-slate-400 flex-shrink-0 ml-2 transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
-      {open && createPortal(
-        <div ref={dropdownRef} style={dropdownStyle} className="bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
-          <div className="max-h-56 overflow-y-auto py-1">
-            {options.map(o => {
-              const Icon = o.icon
-              return (
-                <button
-                  key={o.value}
-                  type="button"
-                  onClick={() => { onChange(o.value); setOpen(false) }}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-left transition-colors hover:bg-slate-50 ${
-                    value === o.value ? 'bg-slate-50' : ''
-                  }`}
-                >
-                  {o.color && (
-                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 mt-0.5" style={{ backgroundColor: o.color }} />
-                  )}
-                  {Icon && <Icon className="w-4 h-4 text-slate-400 flex-shrink-0" />}
-                  <span className="flex-1 min-w-0">
-                    <span className={`block truncate ${value === o.value ? 'text-slate-900 font-medium' : 'text-slate-700'}`}>
-                      {o.label}
-                    </span>
-                    {o.sublabel && (
-                      <span className="block text-xs text-slate-400 truncate">{o.sublabel}</span>
-                    )}
-                  </span>
-                  {value === o.value && <Check className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />}
-                </button>
-              )
-            })}
-          </div>
-        </div>,
-        document.body
-      )}
-    </div>
-  )
-}
-
 export default function TransactionsPage() {
   const { lock } = useAuth()
   const [month, setMonth] = useState(toMonthString(new Date()))
@@ -238,6 +127,8 @@ export default function TransactionsPage() {
   const [rtError, setRtError] = useState('')
   const [rtSaving, setRtSaving] = useState(false)
   const [deletingRt, setDeletingRt] = useState<string | null>(null)
+  const [confirmTx, setConfirmTx] = useState<Transaction | null>(null)
+  const [confirmRt, setConfirmRt] = useState<RecurringTemplate | null>(null)
 
   const loadTx = useCallback(async (m: string) => {
     setLoading(true)
@@ -359,7 +250,6 @@ export default function TransactionsPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this transaction?')) return
     setDeleting(id)
     await fetch('/api/transactions', {
       method: 'DELETE',
@@ -367,6 +257,7 @@ export default function TransactionsPage() {
       body: JSON.stringify({ id }),
     })
     setDeleting(null)
+    setConfirmTx(null)
     loadTx(month)
   }
 
@@ -403,10 +294,10 @@ export default function TransactionsPage() {
   }
 
   const handleDeleteRecurring = async (id: string) => {
-    if (!confirm('Remove this recurring template?')) return
     setDeletingRt(id)
     await fetch('/api/recurring', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) })
     setDeletingRt(null)
+    setConfirmRt(null)
     loadRecurring()
   }
 
@@ -443,6 +334,89 @@ export default function TransactionsPage() {
     setShowRecurringForm(false)
     loadRecurring()
   }
+
+  const [chartAccountId, setChartAccountId] = useState<string>('')
+  const [chartRange, setChartRange] = useState<'month' | 'year' | 'all'>('month')
+  const [allTxForChart, setAllTxForChart] = useState<Transaction[]>([])
+
+  // Fetch all transactions once for year/all-time chart views
+  useEffect(() => {
+    fetch('/api/transactions?all=1')
+      .then(r => { if (r.status === 401) { lock(); return [] } return r.ok ? r.json() : [] })
+      .then(setAllTxForChart)
+  }, [lock])
+
+  // Auto-select checking account (fallback to first)
+  useEffect(() => {
+    if (!chartAccountId && accounts.length > 0) {
+      const checking = accounts.find(a => a.type === 'checking')
+      setChartAccountId((checking ?? accounts[0]).id)
+    }
+  }, [accounts, chartAccountId])
+
+  const chartData = useMemo(() => {
+    if (!chartAccountId) return []
+    const acct = accounts.find(a => a.id === chartAccountId)
+    if (!acct) return []
+
+    // Use all transactions for year/all ranges, current month for month view
+    const sourceTx = chartRange === 'month' ? transactions : allTxForChart
+
+    const [y, m] = month.split('-').map(Number)
+    let cutStart: string | null = null
+    let cutEnd: string | null = null
+    if (chartRange === 'month') {
+      cutStart = new Date(y, m - 1, 1).toISOString().slice(0, 10)
+      cutEnd = new Date(y, m, 0).toISOString().slice(0, 10)
+    } else if (chartRange === 'year') {
+      cutStart = `${y}-01-01`
+      cutEnd = `${y}-12-31`
+    }
+    // 'all' — no filter
+
+    // All relevant transactions for this account, sorted oldest first
+    const allRelevantAsc = sourceTx
+      .filter(t => t.account_id === chartAccountId || t.to_account_id === chartAccountId)
+      .sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id))
+
+    const filtered = allRelevantAsc.filter(t => {
+      if (cutStart && t.date < cutStart) return false
+      if (cutEnd && t.date > cutEnd) return false
+      return true
+    })
+
+    // Compute balance at start of window by reversing all transactions >= cutStart
+    // (or ALL transactions when cutStart is null, for "all time")
+    let runningBalance = acct.balance
+    const allRelevantDesc = [...allRelevantAsc].reverse()
+    for (const t of allRelevantDesc) {
+      if (cutStart === null || t.date >= cutStart) {
+        // Reverse this transaction's effect
+        if (t.type === 'income' && t.account_id === chartAccountId) runningBalance -= t.amount
+        else if (t.type === 'expense' && t.account_id === chartAccountId) runningBalance += t.amount
+        else if (t.type === 'transfer') {
+          if (t.account_id === chartAccountId) runningBalance += t.amount
+          else if (t.to_account_id === chartAccountId) runningBalance -= t.amount
+        }
+      }
+    }
+
+    const startLabel = chartRange === 'month' ? 'Start' : chartRange === 'year' ? 'Jan 1' : 'Start'
+    const points: { name: string; balance: number }[] = [
+      { name: startLabel, balance: runningBalance },
+    ]
+    for (const t of filtered) {
+      if (t.type === 'income' && t.account_id === chartAccountId) runningBalance += t.amount
+      else if (t.type === 'expense' && t.account_id === chartAccountId) runningBalance -= t.amount
+      else if (t.type === 'transfer') {
+        if (t.account_id === chartAccountId) runningBalance -= t.amount
+        else if (t.to_account_id === chartAccountId) runningBalance += t.amount
+      }
+      const label = new Date(t.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      points.push({ name: label, balance: runningBalance })
+    }
+    return points
+  }, [transactions, allTxForChart, chartAccountId, accounts, chartRange, month])
 
   const income = transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
   const expenses = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
@@ -489,6 +463,50 @@ export default function TransactionsPage() {
           </span>
         </div>
       </div>
+
+      {/* Balance chart */}
+      {accounts.length > 0 && chartData.length > 1 && (
+        <div className="bg-white rounded-xl border border-slate-200 p-5 mb-5">
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="text-sm font-medium text-slate-700">Balance History</h4>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center bg-slate-100 rounded-lg p-0.5 gap-0.5">
+                {(['month', 'year', 'all'] as const).map(r => (
+                  <button key={r} onClick={() => setChartRange(r)}
+                    className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors ${
+                      chartRange === r ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                    }`}>
+                    {r === 'month' ? 'Month' : r === 'year' ? 'Year' : 'All Time'}
+                  </button>
+                ))}
+              </div>
+              <select value={chartAccountId} onChange={e => setChartAccountId(e.target.value)}
+                className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-slate-300">
+                {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
+              <defs>
+                <linearGradient id="txBalGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.15} />
+                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+              <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => {
+                const k = v / 1000
+                return Math.abs(k) >= 1 ? `${k < 0 ? '-' : ''}$${Math.abs(k).toFixed(0)}k` : `${v < 0 ? '-' : ''}$${Math.abs(v)}`
+              }} />
+              <Tooltip formatter={(v: number) => [`${v < 0 ? '-' : ''}${fmt(Math.abs(v))}`, 'Balance']} />
+              <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 2" strokeOpacity={0.4} />
+              <Area type="monotone" dataKey="balance" stroke="#6366f1" strokeWidth={2} fill="url(#txBalGrad)" dot={{ r: 3, fill: '#6366f1' }} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
       {/* Search + filter bar */}
       <div className="flex gap-3 mb-4 flex-wrap">
@@ -607,7 +625,7 @@ export default function TransactionsPage() {
                         <Pencil className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        onClick={() => handleDelete(t.id)}
+                        onClick={() => setConfirmTx(t)}
                         disabled={deleting === t.id}
                         className="text-slate-300 hover:text-red-400 transition-colors disabled:opacity-50"
                         title="Delete"
@@ -678,7 +696,7 @@ export default function TransactionsPage() {
                       Use
                     </button>
                     <button
-                      onClick={() => handleDeleteRecurring(rt.id)}
+                      onClick={() => setConfirmRt(rt)}
                       disabled={deletingRt === rt.id}
                       className="text-slate-300 hover:text-red-400 transition-colors disabled:opacity-50"
                     >
@@ -966,6 +984,26 @@ export default function TransactionsPage() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmTx !== null}
+        title="Delete transaction?"
+        message={confirmTx ? <>This will permanently delete <strong>{confirmTx.description || 'this transaction'}</strong>{confirmTx.amount ? <> ({fmt(confirmTx.amount)})</> : null}. This cannot be undone.</> : ''}
+        confirmLabel="Delete"
+        loading={deleting !== null}
+        onConfirm={() => confirmTx && handleDelete(confirmTx.id)}
+        onCancel={() => setConfirmTx(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmRt !== null}
+        title="Remove recurring template?"
+        message={confirmRt ? <>This will remove the recurring template <strong>{confirmRt.description}</strong>. Existing transactions created from it will not be affected.</> : ''}
+        confirmLabel="Remove"
+        loading={deletingRt !== null}
+        onConfirm={() => confirmRt && handleDeleteRecurring(confirmRt.id)}
+        onCancel={() => setConfirmRt(null)}
+      />
     </div>
   )
 }

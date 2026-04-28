@@ -2,12 +2,14 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 
-type AuthState = 'checking' | 'needs-setup' | 'locked' | 'unlocked'
+// 'needs-login' covers both "no account yet" and "session expired"
+type AuthState = 'checking' | 'needs-login' | 'unlocked'
 
 interface AuthContextValue {
   state: AuthState
-  unlock: (password: string) => Promise<string | null>
-  setup: (password: string) => Promise<string | null>
+  username: string | null
+  login: (username: string, password: string) => Promise<string | null>
+  register: (username: string, password: string, code?: string) => Promise<string | null>
   lock: () => Promise<void>
 }
 
@@ -15,53 +17,55 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>('checking')
+  const [username, setUsername] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'status', password: '' }),
+      body: JSON.stringify({ action: 'status' }),
     })
       .then(r => r.json())
       .then(data => {
-        setState(data.isSetUp ? 'locked' : 'needs-setup')
+        if (data.loggedIn) { setState('unlocked') } else { setState('needs-login') }
       })
-      .catch(() => setState('locked'))
+      .catch(() => setState('needs-login'))
   }, [])
 
-  const setup = async (password: string): Promise<string | null> => {
+  const login = async (user: string, password: string): Promise<string | null> => {
     const res = await fetch('/api/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'setup', password }),
+      body: JSON.stringify({ action: 'login', username: user, password }),
     })
     const data = await res.json()
-    if (res.ok) { setState('unlocked'); return null }
-    return data.error ?? 'Setup failed'
+    if (res.ok) { setState('unlocked'); setUsername(data.username); return null }
+    return data.error ?? 'Login failed'
   }
 
-  const unlock = async (password: string): Promise<string | null> => {
+  const register = async (user: string, password: string, code?: string): Promise<string | null> => {
     const res = await fetch('/api/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'unlock', password }),
+      body: JSON.stringify({ action: 'register', username: user, password, registrationCode: code }),
     })
     const data = await res.json()
-    if (res.ok) { setState('unlocked'); return null }
-    return data.error ?? 'Unlock failed'
+    if (res.ok) { setState('unlocked'); setUsername(data.username); return null }
+    return data.error ?? 'Registration failed'
   }
 
   const lock = async () => {
     await fetch('/api/auth', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'lock', password: '' }),
+      body: JSON.stringify({ action: 'lock' }),
     })
-    setState('locked')
+    setState('needs-login')
+    setUsername(null)
   }
 
   return (
-    <AuthContext.Provider value={{ state, unlock, setup, lock }}>
+    <AuthContext.Provider value={{ state, username, login, register, lock }}>
       {children}
     </AuthContext.Provider>
   )

@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { getServerSession } from '@/lib/server-session'
 import { encrypt, decrypt } from '@/lib/crypto'
-import { requireSessionKey } from '@/lib/session'
 import { v4 as uuidv4 } from 'uuid'
-
 interface SnapshotRow {
   id: string
   month: string
@@ -13,10 +11,9 @@ interface SnapshotRow {
 
 // GET /api/net-worth — list all snapshots sorted by month
 export async function GET() {
-  let key: Buffer
-  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
-
-  const db = getDb()
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { key, db } = session
   const rows = db.prepare('SELECT * FROM net_worth_snapshots ORDER BY month ASC').all() as SnapshotRow[]
   const result = rows.map(r => ({
     id: r.id,
@@ -29,8 +26,9 @@ export async function GET() {
 
 // POST /api/net-worth — upsert a snapshot for a given month
 export async function POST(req: NextRequest) {
-  let key: Buffer
-  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { key, db } = session
 
   const body = await req.json() as { month?: string; amount?: number }
   const { month, amount } = body
@@ -42,7 +40,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'month must be YYYY-MM' }, { status: 400 })
   }
 
-  const db = getDb()
   const amount_enc = encrypt(String(amount), key)
 
   const existing = db.prepare('SELECT id FROM net_worth_snapshots WHERE month = ?').get(month) as { id: string } | undefined
@@ -58,12 +55,13 @@ export async function POST(req: NextRequest) {
 
 // DELETE /api/net-worth — delete a snapshot by id
 export async function DELETE(req: NextRequest) {
-  try { requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { db } = session
 
   const body = await req.json() as { id?: string }
   if (!body.id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
-  const db = getDb()
   db.prepare('DELETE FROM net_worth_snapshots WHERE id = ?').run(body.id)
   return NextResponse.json({ ok: true })
 }

@@ -1,3 +1,9 @@
 data/
 .next/
 node_modules/
+.env
+.env.local
+terraform/terraform.tfvars
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup

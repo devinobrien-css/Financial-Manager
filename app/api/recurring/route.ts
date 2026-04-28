@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { getServerSession } from '@/lib/server-session'
 import { encrypt, decrypt } from '@/lib/crypto'
-import { requireSessionKey } from '@/lib/session'
 import { v4 as uuidv4 } from 'uuid'
-
 interface RecurringRow {
   id: string
   type: string
@@ -22,10 +20,9 @@ interface RecurringRow {
 interface AccountRow { id: string; name_enc: string }
 
 export async function GET() {
-  let key: Buffer
-  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
-
-  const db = getDb()
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { key, db } = session
   const accountRows = db.prepare('SELECT id, name_enc FROM accounts').all() as AccountRow[]
   const accountMap = new Map(accountRows.map(r => {
     try { return [r.id, decrypt(r.name_enc, key)] } catch { return [r.id, '?'] }
@@ -57,8 +54,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  let key: Buffer
-  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { key, db } = session
 
   const body = await req.json()
   const { type, description, amount, account_id, to_account_id, category_id, frequency, next_date } = body
@@ -72,7 +70,6 @@ export async function POST(req: NextRequest) {
   const numAmount = parseFloat(amount)
   if (isNaN(numAmount) || numAmount <= 0) return NextResponse.json({ error: 'invalid amount' }, { status: 400 })
 
-  const db = getDb()
   const id = uuidv4()
   db.prepare(`
     INSERT INTO recurring_templates
@@ -89,14 +86,14 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  let key: Buffer
-  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { key, db } = session
 
   const body = await req.json()
   const { id, type, description, amount, account_id, to_account_id, category_id, frequency, next_date } = body
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
-  const db = getDb()
   const updates: string[] = []
   const params: unknown[] = []
 
@@ -116,9 +113,11 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  try { requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { db } = session
   const { id } = await req.json()
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
-  getDb().prepare('DELETE FROM recurring_templates WHERE id = ?').run(id)
+  db.prepare('DELETE FROM recurring_templates WHERE id = ?').run(id)
   return NextResponse.json({ ok: true })
 }

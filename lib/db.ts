@@ -3,18 +3,20 @@ import path from 'path'
 import fs from 'fs'
 
 const DB_DIR = path.join(process.cwd(), 'data')
-const DB_PATH = path.join(DB_DIR, 'finance.db')
 
-let _db: Database.Database | null = null
+// Per-user DB instances keyed by userId
+const _dbs = new Map<string, Database.Database>()
 
-export function getDb(): Database.Database {
-  if (_db) return _db
-  fs.mkdirSync(DB_DIR, { recursive: true })
-  _db = new Database(DB_PATH)
-  _db.pragma('journal_mode = WAL')
-  _db.pragma('foreign_keys = ON')
-  initSchema(_db)
-  return _db
+export function getDb(userId: string): Database.Database {
+  if (_dbs.has(userId)) return _dbs.get(userId)!
+  const userDir = path.join(DB_DIR, 'users', userId)
+  fs.mkdirSync(userDir, { recursive: true })
+  const db = new Database(path.join(userDir, 'finance.db'))
+  db.pragma('journal_mode = WAL')
+  db.pragma('foreign_keys = ON')
+  initSchema(db)
+  _dbs.set(userId, db)
+  return db
 }
 
 function initSchema(db: Database.Database): void {
@@ -533,11 +535,14 @@ function seedCategories(db: Database.Database): void {
       ['Groceries',     'expense', '#f97316'],
       ['Utilities',     'expense', '#eab308'],
       ['Transport',     'expense', '#3b82f6'],
+      ['Gas & Fuel',    'expense', '#f43f5e'],
+      ['Car Care',      'expense', '#0ea5e9'],
       ['Healthcare',    'expense', '#a855f7'],
       ['Dining Out',    'expense', '#ec4899'],
       ['Entertainment', 'expense', '#06b6d4'],
       ['Shopping',      'expense', '#f59e0b'],
       ['Insurance',     'expense', '#64748b'],
+      ['Taxes',         'expense', '#7c3aed'],
       ['Other Expense', 'expense', '#94a3b8'],
     ])
   }

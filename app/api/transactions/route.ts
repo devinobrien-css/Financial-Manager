@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { getServerSession } from '@/lib/server-session'
 import { encrypt, decrypt } from '@/lib/crypto'
-import { requireSessionKey } from '@/lib/session'
 import { v4 as uuidv4 } from 'uuid'
-
 interface TxRow {
   id: string
   type: string
@@ -24,8 +22,7 @@ interface AccountNameRow {
   name_enc: string
 }
 
-function buildAccountMap(key: Buffer): Map<string, string> {
-  const db = getDb()
+function buildAccountMap(db: import('better-sqlite3').Database, key: Buffer): Map<string, string> {
   const rows = db.prepare('SELECT id, name_enc FROM accounts').all() as AccountNameRow[]
   const map = new Map<string, string>()
   for (const r of rows) {
@@ -54,16 +51,16 @@ function decryptRow(row: TxRow, key: Buffer, accountMap: Map<string, string>) {
 }
 
 export async function GET(req: NextRequest) {
-  let key: Buffer
-  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { key, db } = session
 
   const { searchParams } = new URL(req.url)
   const month = searchParams.get('month') // YYYY-MM
   const accountIdFilter = searchParams.get('account_id') // for statement view
   const allTx = searchParams.get('all') === '1'
 
-  const db = getDb()
-  const accountMap = buildAccountMap(key)
+  const accountMap = buildAccountMap(db, key)
 
   let rows: TxRow[]
   if (accountIdFilter) {
@@ -97,8 +94,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  let key: Buffer
-  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { key, db } = session
 
   const body = await req.json()
   const { type, amount, description, memo, category_id, account_id, to_account_id, date } = body
@@ -117,7 +115,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'amount must be a positive number' }, { status: 400 })
   }
 
-  const db = getDb()
   const id = uuidv4()
   const amount_enc = encrypt(numAmount.toFixed(2), key)
   const description_enc = description ? encrypt(description.trim(), key) : null
@@ -137,14 +134,14 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  let key: Buffer
-  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { key, db } = session
 
   const body = await req.json()
   const { id, type, amount, description, memo, category_id, account_id, to_account_id, date } = body
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
-  const db = getDb()
   const updates: string[] = []
   const params: unknown[] = []
 
@@ -164,12 +161,13 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  try { requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { db } = session
 
   const { id } = await req.json()
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
-  const db = getDb()
   db.prepare('DELETE FROM transactions WHERE id = ?').run(id)
   return NextResponse.json({ ok: true })
 }

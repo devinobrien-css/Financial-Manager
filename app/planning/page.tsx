@@ -4,9 +4,11 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import {
   TrendingDown, ChevronDown, ChevronUp, Flame, Snowflake, CheckCircle2,
   Plus, Trash2, X, Wallet, CreditCard, Banknote, PiggyBank, Landmark,
-  TrendingUp, ArrowRightLeft, CalendarDays,
+  TrendingUp, ArrowRightLeft, CalendarDays, CheckCheck, Copy,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
+import { ConfirmDialog } from '@/components/ConfirmDialog'
+import { CustomSelect } from '@/components/CustomSelect'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine,
 } from 'recharts'
@@ -20,6 +22,7 @@ interface Account {
   balance: number
   opening_balance: number
   apr: number | null
+  credit_limit: number | null
 }
 
 interface Category {
@@ -43,6 +46,16 @@ interface ForecastItem {
 // ─── Utility ─────────────────────────────────────────────────────────────────
 
 function fmt(n: number) { return Math.abs(n).toLocaleString('en-US', { style: 'currency', currency: 'USD' }) }
+function acctSublabel(a: Account): string {
+  const parts: string[] = [ACCOUNT_LABELS[a.type]]
+  if (a.balance < 0) {
+    parts.push(`${fmt(a.balance)} owed`)
+  } else {
+    parts.push(`${fmt(a.balance)} available`)
+  }
+  if (a.apr !== null) parts.push(`${a.apr.toFixed(2)}% APR`)
+  return parts.join(' · ')
+}
 function fmtSigned(n: number) {
   const s = Math.abs(n).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
   return n < 0 ? `-${s}` : `+${s}`
@@ -246,29 +259,47 @@ function ForecastForm({
           {type !== 'transfer' ? (
             <div>
               <label className="block text-xs text-slate-500 mb-1">Account</label>
-              <select value={accountId} onChange={e => setAccountId(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white">
-                <option value="">— Select account —</option>
-                {accounts.map(a => <option key={a.id} value={a.id}>{a.name} ({ACCOUNT_LABELS[a.type]})</option>)}
-              </select>
+              <CustomSelect
+                value={accountId}
+                onChange={setAccountId}
+                placeholder="— Select account —"
+                options={accounts.map(a => ({
+                  value: a.id,
+                  label: a.name,
+                  sublabel: acctSublabel(a),
+                  icon: ACCOUNT_ICONS[a.type],
+                }))}
+              />
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-slate-500 mb-1">From</label>
-                <select value={accountId} onChange={e => setAccountId(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white">
-                  <option value="">— Select —</option>
-                  {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
+                <CustomSelect
+                  value={accountId}
+                  onChange={setAccountId}
+                  placeholder="— Select —"
+                  options={accounts.map(a => ({
+                    value: a.id,
+                    label: a.name,
+                    sublabel: acctSublabel(a),
+                    icon: ACCOUNT_ICONS[a.type],
+                  }))}
+                />
               </div>
               <div>
                 <label className="block text-xs text-slate-500 mb-1">To</label>
-                <select value={toAccountId} onChange={e => setToAccountId(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white">
-                  <option value="">— Select —</option>
-                  {accounts.filter(a => a.id !== accountId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
+                <CustomSelect
+                  value={toAccountId}
+                  onChange={setToAccountId}
+                  placeholder="— Select —"
+                  options={accounts.filter(a => a.id !== accountId).map(a => ({
+                    value: a.id,
+                    label: a.name,
+                    sublabel: acctSublabel(a),
+                    icon: ACCOUNT_ICONS[a.type],
+                  }))}
+                />
               </div>
             </div>
           )}
@@ -276,11 +307,12 @@ function ForecastForm({
           {type !== 'transfer' && relevantCats.length > 0 && (
             <div>
               <label className="block text-xs text-slate-500 mb-1">Category (optional)</label>
-              <select value={categoryId} onChange={e => setCategoryId(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white">
-                <option value="">— None —</option>
-                {relevantCats.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              <CustomSelect
+                value={categoryId}
+                onChange={setCategoryId}
+                placeholder="— None —"
+                options={relevantCats.map(c => ({ value: String(c.id), label: c.name, color: c.color }))}
+              />
             </div>
           )}
           {error && <p className="text-red-500 text-sm">{error}</p>}
@@ -298,6 +330,114 @@ function ForecastForm({
   )
 }
 
+// ─── Step Snapshot Panel ──────────────────────────────────────────────────────
+
+function StepSnapshotPanel({ step, stepIndex, accounts, prevBalances, onClose }: {
+  step: ForecastStep
+  stepIndex: number
+  accounts: Account[]
+  prevBalances: Record<string, number>
+  onClose: () => void
+}) {
+  const TYPE_COLOR = { income: 'text-green-600', expense: 'text-red-500', transfer: 'text-blue-500' }
+  const TYPE_ICON = { income: TrendingUp, expense: TrendingDown, transfer: ArrowRightLeft }
+  const Icon = TYPE_ICON[step.item.type]
+  const color = TYPE_COLOR[step.item.type]
+
+  const todayNetWorth = accounts.reduce((s, a) => s + a.balance, 0)
+
+  return (
+    <div>
+      {/* Net worth at this step */}
+      {(() => {
+        const stepNetWorth = accounts.reduce((s, a) => s + (step.balances[a.id] ?? prevBalances[a.id] ?? a.balance), 0)
+        const diff = stepNetWorth - todayNetWorth
+        return (
+          <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3 mb-4">
+            <p className="text-xs text-indigo-400 font-semibold uppercase tracking-wider mb-1">Net Worth at Step {stepIndex + 1}</p>
+            <p className={`text-lg font-bold tabular-nums ${stepNetWorth < 0 ? 'text-red-500' : 'text-indigo-700'}`}>
+              {stepNetWorth < 0 ? '-' : ''}{fmt(Math.abs(stepNetWorth))}
+            </p>
+            {diff !== 0 && (
+              <p className={`text-xs mt-0.5 font-medium ${diff >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                {fmtSigned(diff)} from today
+              </p>
+            )}
+          </div>
+        )
+      })()}
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-xs font-semibold uppercase tracking-wider text-indigo-500">
+          Snapshot — Step {stepIndex + 1}
+        </h4>
+        <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* Transaction summary card */}
+      <div className={`rounded-xl border p-3 mb-4 ${
+        step.item.type === 'income' ? 'bg-green-50 border-green-100'
+        : step.item.type === 'expense' ? 'bg-red-50 border-red-100'
+        : 'bg-blue-50 border-blue-100'
+      }`}>
+        <div className="flex items-center gap-2">
+          <div className={`rounded-lg p-1.5 ${
+            step.item.type === 'income' ? 'bg-green-100'
+            : step.item.type === 'expense' ? 'bg-red-100'
+            : 'bg-blue-100'
+          }`}>
+            <Icon className={`w-3.5 h-3.5 ${color}`} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-slate-800 truncate">{step.label}</p>
+            <p className="text-xs text-slate-500">{formatDate(step.date)}</p>
+          </div>
+          <p className={`text-sm font-bold tabular-nums ${color}`}>
+            {step.item.type === 'expense' ? '-' : step.item.type === 'income' ? '+' : ''}{fmt(step.item.amount)}
+          </p>
+        </div>
+      </div>
+
+      {/* All account balances at this step */}
+      <div className="space-y-2">
+        {accounts.map(a => {
+          const bal = step.balances[a.id] ?? prevBalances[a.id] ?? a.balance
+          const delta = step.delta[a.id]
+          const netFromStart = bal - a.balance
+          const AccountIcon = ACCOUNT_ICONS[a.type]
+          const isAffected = delta !== undefined
+          return (
+            <div key={a.id} className={`bg-white rounded-xl border p-3 transition-colors ${
+              isAffected ? 'border-indigo-200' : 'border-slate-100'
+            }`}>
+              <div className="flex items-center gap-2 mb-1">
+                <AccountIcon className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                <p className="text-xs text-slate-500 truncate flex-1">{a.name}</p>
+                {isAffected && (
+                  <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+                    delta >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'
+                  }`}>
+                    {fmtSigned(delta)}
+                  </span>
+                )}
+              </div>
+              <p className={`text-sm font-semibold tabular-nums ${bal < 0 ? 'text-red-500' : 'text-slate-800'}`}>
+                {bal < 0 ? '-' : ''}{fmt(bal)}
+              </p>
+              {netFromStart !== 0 && (
+                <p className={`text-xs mt-0.5 ${netFromStart > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                  {fmtSigned(netFromStart)} from today
+                </p>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ─── Forecast Tab ─────────────────────────────────────────────────────────────
 
 function ForecastTab({ accounts, categories }: { accounts: Account[]; categories: Category[] }) {
@@ -306,7 +446,12 @@ function ForecastTab({ accounts, categories }: { accounts: Account[]; categories
   const [showForm, setShowForm] = useState(false)
   const [editingItem, setEditingItem] = useState<ForecastItem | null>(null)
   const [focusAccountId, setFocusAccountId] = useState<string>('')
+  const [chartRange, setChartRange] = useState<'default' | 'month' | 'year' | 'all'>('default')
   const [loading, setLoading] = useState(true)
+  const [confirmDelete, setConfirmDelete] = useState<ForecastItem | null>(null)
+  const [confirmConvert, setConfirmConvert] = useState<ForecastItem | null>(null)
+  const [selectedStepIdx, setSelectedStepIdx] = useState<number | null>(null)
+  const [busy, setBusy] = useState(false)
 
   const load = useCallback(async () => {
     const res = await fetch('/api/forecast')
@@ -325,8 +470,52 @@ function ForecastTab({ accounts, categories }: { accounts: Account[]; categories
     }
   }, [accounts, focusAccountId])
 
-  const handleDelete = async (id: string) => {
-    await fetch('/api/forecast', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) })
+  const handleDelete = async (item: ForecastItem) => {
+    setBusy(true)
+    await fetch('/api/forecast', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: item.id }) })
+    setBusy(false)
+    setConfirmDelete(null)
+    load()
+  }
+
+  const handleDuplicate = async (item: ForecastItem) => {
+    await fetch('/api/forecast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: item.type,
+        label: item.label,
+        amount: item.amount,
+        date: item.date,
+        account_id: item.account_id,
+        to_account_id: item.to_account_id,
+        category_id: item.category_id,
+      }),
+    })
+    load()
+  }
+
+  const handleConvert = async (item: ForecastItem, amount: number, date: string) => {
+    setBusy(true)
+    const body: Record<string, unknown> = {
+      type: item.type,
+      amount,
+      description: item.label,
+      date,
+      account_id: item.account_id,
+      to_account_id: item.to_account_id,
+      category_id: item.category_id,
+    }
+    const res = await fetch('/api/transactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (res.ok) {
+      await fetch('/api/forecast', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: item.id }) })
+    }
+    setBusy(false)
+    setConfirmConvert(null)
     load()
   }
 
@@ -336,16 +525,50 @@ function ForecastTab({ accounts, categories }: { accounts: Account[]; categories
   const chartData = useMemo(() => {
     if (!focusAccountId) return []
     const startBal = accounts.find(a => a.id === focusAccountId)?.balance ?? 0
-    const points: { name: string; balance: number; step?: string }[] = [
-      { name: 'Today', balance: startBal },
-    ]
-    for (const s of steps) {
+    const today = new Date()
+    const todayStr = today.toISOString().slice(0, 10)
+
+    let cutoffStart: string | null = null
+    let cutoffEnd: string | null = null
+    if (chartRange === 'default') {
+      cutoffStart = todayStr
+    } else if (chartRange === 'month') {
+      const y = today.getFullYear(), m = today.getMonth()
+      cutoffStart = new Date(y, m, 1).toISOString().slice(0, 10)
+      cutoffEnd = new Date(y, m + 1, 0).toISOString().slice(0, 10)
+    } else if (chartRange === 'year') {
+      const y = today.getFullYear()
+      cutoffStart = `${y}-01-01`
+      cutoffEnd = `${y}-12-31`
+    }
+    // 'all' — no filtering
+
+    const filteredSteps = steps.filter(s => {
+      if (cutoffStart && s.date < cutoffStart) return false
+      if (cutoffEnd && s.date > cutoffEnd) return false
+      return true
+    })
+
+    const points: { name: string; balance: number; step?: string }[] = []
+    // For 'default' and 'all', start with today's balance
+    if (chartRange !== 'month' && chartRange !== 'year') {
+      points.push({ name: 'Today', balance: startBal })
+    } else {
+      // For month/year, start from the balance just before the window
+      const stepsBeforeWindow = steps.filter(s => cutoffStart && s.date < cutoffStart)
+      const startingBal = stepsBeforeWindow.length > 0
+        ? stepsBeforeWindow.at(-1)!.balances[focusAccountId] ?? startBal
+        : startBal
+      points.push({ name: chartRange === 'month' ? 'Month Start' : 'Year Start', balance: startingBal })
+    }
+
+    for (const s of filteredSteps) {
       if (s.balances[focusAccountId] !== undefined) {
         points.push({ name: formatDate(s.date), balance: s.balances[focusAccountId], step: s.label })
       }
     }
     return points
-  }, [steps, focusAccountId, accounts])
+  }, [steps, focusAccountId, accounts, chartRange])
 
   // All account IDs that appear in the forecast
   const affectedAccountIds = useMemo(() => {
@@ -357,8 +580,49 @@ function ForecastTab({ accounts, categories }: { accounts: Account[]; categories
   // Build per-account final balance from last step
   const finalBalances = useMemo(() => {
     if (steps.length === 0) return {} as Record<string, number>
-    return steps[steps.length - 1].balances
+    return steps.at(-1)!.balances
   }, [steps])
+
+  // Interest charges: for each month boundary crossed, compute interest on debt accounts
+  interface InterestEvent {
+    afterStepIdx: number   // insert after this step index (-1 = before first step)
+    monthLabel: string
+    charges: { id: string; name: string; apr: number; balance: number; charge: number }[]
+  }
+  const interestEvents = useMemo((): InterestEvent[] => {
+    const debtAccounts = accounts.filter(a => a.apr !== null && (a.type === 'credit' || a.type === 'loan'))
+    if (debtAccounts.length === 0 || steps.length === 0) return []
+
+    const events: InterestEvent[] = []
+    // Months already emitted (YYYY-MM strings)
+    const seen = new Set<string>()
+
+    // Check today as start month
+    const todayYM = new Date().toISOString().slice(0, 7)
+
+    for (let i = 0; i < steps.length; i++) {
+      const ym = steps[i].date.slice(0, 7)
+      const prevBalances = i === 0
+        ? Object.fromEntries(accounts.map(a => [a.id, a.balance]))
+        : steps[i - 1].balances
+
+      if (!seen.has(ym) && ym > todayYM) {
+        seen.add(ym)
+        const [y, m] = ym.split('-').map(Number)
+        const monthLabel = new Date(y, m - 1).toLocaleString('en-US', { month: 'long', year: 'numeric' })
+        const charges = debtAccounts
+          .map(a => {
+            const bal = prevBalances[a.id] ?? a.balance
+            const owed = Math.abs(Math.min(0, bal))
+            const charge = owed * (a.apr! / 100 / 12)
+            return { id: a.id, name: a.name, apr: a.apr!, balance: bal, charge }
+          })
+          .filter(c => c.charge > 0.005)
+        if (charges.length > 0) events.push({ afterStepIdx: i - 1, monthLabel, charges })
+      }
+    }
+    return events
+  }, [steps, accounts])
 
   const TYPE_COLOR = { income: 'text-green-600', expense: 'text-red-500', transfer: 'text-blue-500' }
   const TYPE_ICON = { income: TrendingUp, expense: TrendingDown, transfer: ArrowRightLeft }
@@ -394,10 +658,22 @@ function ForecastTab({ accounts, categories }: { accounts: Account[]; categories
             <div className="bg-white rounded-xl border border-slate-200 p-5">
               <div className="flex items-center justify-between mb-4">
                 <h4 className="text-sm font-medium text-slate-700">Balance Forecast</h4>
-                <select value={focusAccountId} onChange={e => setFocusAccountId(e.target.value)}
-                  className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-slate-300">
-                  {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center bg-slate-100 rounded-lg p-0.5 gap-0.5">
+                    {(['default', 'month', 'year', 'all'] as const).map(r => (
+                      <button key={r} onClick={() => setChartRange(r)}
+                        className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors ${
+                          chartRange === r ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                        }`}>
+                        {r === 'default' ? 'Default' : r === 'month' ? 'Month' : r === 'year' ? 'Year' : 'All Time'}
+                      </button>
+                    ))}
+                  </div>
+                  <select value={focusAccountId} onChange={e => setFocusAccountId(e.target.value)}
+                    className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-slate-300">
+                    {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                </div>
               </div>
               <ResponsiveContainer width="100%" height={200}>
                 <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
@@ -409,8 +685,8 @@ function ForecastTab({ accounts, categories }: { accounts: Account[]; categories
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                   <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `$${Math.round(v / 1000) !== 0 ? `${(v / 1000).toFixed(0)}k` : v}`} />
-                  <Tooltip formatter={(v: number) => [fmt(v), 'Balance']} />
+                  <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => { const k = v / 1000; return Math.abs(k) >= 1 ? `${k < 0 ? '-' : ''}$${Math.abs(k).toFixed(0)}k` : `${v < 0 ? '-' : ''}$${Math.abs(v)}` }} />
+                  <Tooltip formatter={(v: number) => [`${(v as number) < 0 ? '-' : ''}${fmt(v as number)}`, 'Balance']} />
                   <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 2" strokeOpacity={0.4} />
                   <Area type="monotone" dataKey="balance" stroke="#6366f1" strokeWidth={2} fill="url(#balGrad)" dot={{ r: 3, fill: '#6366f1' }} />
                 </AreaChart>
@@ -418,17 +694,56 @@ function ForecastTab({ accounts, categories }: { accounts: Account[]; categories
             </div>
           )}
 
-          <div className="grid grid-cols-3 gap-6">
+          <div className="grid grid-cols-2 gap-6">
             {/* Timeline of planned transactions */}
-            <div className="col-span-2 space-y-2">
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Planned Transactions</h4>
+            <div className="col-span-2 self-start space-y-2">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">Planned Transactions</h4>
+                {interestEvents.length > 0 && (() => {
+                  const total = interestEvents.reduce((sum, ev) => sum + ev.charges.reduce((s, c) => s + c.charge, 0), 0)
+                  const monthly = total / interestEvents.length
+                  return (
+                    <span className="flex items-center gap-1.5 bg-orange-50 border border-orange-200 text-orange-600 text-xs font-semibold px-2.5 py-1 rounded-full">
+                      <span>%</span> {fmt(monthly)}/mo est. interest
+                    </span>
+                  )
+                })()}
+              </div>
               {steps.map((step, i) => {
                 const Icon = TYPE_ICON[step.item.type]
                 const color = TYPE_COLOR[step.item.type]
                 const accountName = step.item.account_id ? accounts.find(a => a.id === step.item.account_id)?.name : null
                 const toAccountName = step.item.to_account_id ? accounts.find(a => a.id === step.item.to_account_id)?.name : null
+                const interestBefore = interestEvents.filter(e => e.afterStepIdx === i - 1)
                 return (
-                  <div key={step.item.id} className="bg-white rounded-xl border border-slate-200 p-4 flex items-start gap-3 group">
+                  <div key={step.item.id}>
+                    {interestBefore.map(ev => (
+                      <div key={ev.monthLabel} className="mb-2">
+                        <div className="flex items-center gap-2 mb-1.5 pl-1">
+                          <p className="text-xs font-semibold uppercase tracking-wider text-orange-400">{ev.monthLabel} — Interest</p>
+                          <span className="text-xs font-semibold text-orange-600 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-full">
+                            {fmt(ev.charges.reduce((s, c) => s + c.charge, 0))} total
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {ev.charges.map(c => (
+                            <div key={c.id} className="flex items-center gap-2 bg-orange-50 border border-orange-100 rounded-lg px-3 py-2 text-xs">
+                              <span className="text-orange-400">%</span>
+                              <span className="text-slate-600 font-medium">{c.name}</span>
+                              <span className="text-slate-400">{c.apr.toFixed(2)}% APR</span>
+                              <span className="font-semibold text-orange-600">+{fmt(c.charge)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  <div
+                    onClick={() => setSelectedStepIdx(selectedStepIdx === i ? null : i)}
+                    className={`rounded-xl border p-4 flex items-start gap-3 group cursor-pointer transition-all ${
+                      selectedStepIdx === i
+                        ? 'bg-indigo-50/40 border-indigo-300 ring-1 ring-indigo-200'
+                        : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}>
                     <div className={`mt-0.5 rounded-lg p-1.5 ${step.item.type === 'income' ? 'bg-green-50' : step.item.type === 'expense' ? 'bg-red-50' : 'bg-blue-50'}`}>
                       <Icon className={`w-3.5 h-3.5 ${color}`} />
                     </div>
@@ -453,16 +768,26 @@ function ForecastTab({ accounts, categories }: { accounts: Account[]; categories
                           return (
                             <span key={id} className="text-xs px-1.5 py-0.5 rounded bg-slate-50 border border-slate-100 text-slate-500">
                               {acc.name}: <span className={d >= 0 ? 'text-green-600' : 'text-red-500'}>{fmtSigned(d)}</span>
-                              {' '}→ <span className="font-medium text-slate-700">{fmt(step.balances[id])}</span>
+                              {' '}→ <span className={`font-medium ${step.balances[id] < 0 ? 'text-red-500' : 'text-slate-700'}`}>{step.balances[id] < 0 ? '-' : ''}{fmt(step.balances[id])}</span>
                             </span>
                           )
                         })}
                       </div>
                     </div>
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                      <button onClick={() => { setEditingItem(step.item); setShowForm(true) }}
+                      <button onClick={e => { e.stopPropagation(); setConfirmConvert(step.item) }}
+                        title="Convert to transaction"
+                        className="text-slate-300 hover:text-green-600 p-1 rounded transition-colors">
+                        <CheckCheck className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={e => { e.stopPropagation(); handleDuplicate(step.item) }}
+                        title="Duplicate"
+                        className="text-slate-300 hover:text-indigo-500 p-1 rounded transition-colors">
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={e => { e.stopPropagation(); setEditingItem(step.item); setShowForm(true) }}
                         className="text-slate-300 hover:text-slate-600 p-1 rounded transition-colors text-xs">Edit</button>
-                      <button onClick={() => handleDelete(step.item.id)}
+                      <button onClick={e => { e.stopPropagation(); setConfirmDelete(step.item) }}
                         className="text-slate-300 hover:text-red-400 p-1 rounded transition-colors">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -470,48 +795,82 @@ function ForecastTab({ accounts, categories }: { accounts: Account[]; categories
                     {/* Step number badge */}
                     <span className="shrink-0 text-xs text-slate-300 w-5 text-right">{i + 1}</span>
                   </div>
+                  </div>
                 )
               })}
             </div>
 
-            {/* Final account snapshots */}
-            <div>
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">After All Transactions</h4>
-              <div className="space-y-2">
-                {affectedAccountIds.length === 0 ? (
-                  accounts.map(a => (
-                    <div key={a.id} className="bg-white rounded-xl border border-slate-100 p-3">
-                      <p className="text-xs text-slate-500 truncate">{a.name}</p>
-                      <p className={`text-sm font-semibold tabular-nums mt-0.5 ${a.balance < 0 ? 'text-red-500' : 'text-slate-700'}`}>
-                        {a.balance < 0 ? '-' : ''}{fmt(a.balance)}
-                      </p>
-                    </div>
-                  ))
-                ) : (
-                  accounts.filter(a => affectedAccountIds.includes(a.id) || finalBalances[a.id] !== undefined).map(a => {
-                    const final = finalBalances[a.id] ?? a.balance
-                    const current = a.balance
-                    const diff = final - current
-                    const Icon = ACCOUNT_ICONS[a.type]
+            {/* Right panel: fixed to viewport */}
+            <div className="fixed top-0 right-0 w-72 h-screen overflow-y-auto bg-slate-50 border-l border-slate-200 p-4 z-10">
+              {selectedStepIdx !== null ? (
+                <StepSnapshotPanel
+                  step={steps[selectedStepIdx]}
+                  stepIndex={selectedStepIdx}
+                  accounts={accounts}
+                  prevBalances={selectedStepIdx > 0 ? steps[selectedStepIdx - 1].balances : Object.fromEntries(accounts.map(a => [a.id, a.balance]))}
+                  onClose={() => setSelectedStepIdx(null)}
+                />
+              ) : (
+                <>
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">After All Transactions</h4>
+                  {/* Projected net worth card */}
+                  {(() => {
+                    const todayNW = accounts.reduce((s, a) => s + a.balance, 0)
+                    const projectedNW = accounts.reduce((s, a) => s + (finalBalances[a.id] ?? a.balance), 0)
+                    const diff = projectedNW - todayNW
                     return (
-                      <div key={a.id} className="bg-white rounded-xl border border-slate-200 p-3">
-                        <div className="flex items-center gap-2 mb-1">
-                          <Icon className="w-3.5 h-3.5 text-slate-400" />
-                          <p className="text-xs text-slate-500 truncate flex-1">{a.name}</p>
-                        </div>
-                        <p className={`text-sm font-semibold tabular-nums ${final < 0 ? 'text-red-500' : 'text-slate-800'}`}>
-                          {final < 0 ? '-' : ''}{fmt(final)}
+                      <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-3 mb-3">
+                        <p className="text-xs text-indigo-400 font-semibold uppercase tracking-wider mb-1">Projected Net Worth</p>
+                        <p className={`text-lg font-bold tabular-nums ${projectedNW < 0 ? 'text-red-500' : 'text-indigo-700'}`}>
+                          {projectedNW < 0 ? '-' : ''}{fmt(Math.abs(projectedNW))}
                         </p>
                         {diff !== 0 && (
-                          <p className={`text-xs mt-0.5 ${diff > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                          <p className={`text-xs mt-0.5 font-medium ${diff >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                             {fmtSigned(diff)} from today
                           </p>
                         )}
+                        <p className="text-xs text-indigo-300 mt-1">Today: {todayNW < 0 ? '-' : ''}{fmt(Math.abs(todayNW))}</p>
                       </div>
                     )
-                  })
-                )}
-              </div>
+                  })()}
+                  <p className="text-xs text-slate-400 mb-3">Click a transaction to inspect balances at that point.</p>
+                  <div className="space-y-2">
+                    {affectedAccountIds.length === 0 ? (
+                      accounts.map(a => (
+                        <div key={a.id} className="bg-white rounded-xl border border-slate-100 p-3">
+                          <p className="text-xs text-slate-500 truncate">{a.name}</p>
+                          <p className={`text-sm font-semibold tabular-nums mt-0.5 ${a.balance < 0 ? 'text-red-500' : 'text-slate-700'}`}>
+                            {a.balance < 0 ? '-' : ''}{fmt(a.balance)}
+                          </p>
+                        </div>
+                      ))
+                    ) : (
+                      accounts.filter(a => affectedAccountIds.includes(a.id) || finalBalances[a.id] !== undefined).map(a => {
+                        const final = finalBalances[a.id] ?? a.balance
+                        const current = a.balance
+                        const diff = final - current
+                        const Icon = ACCOUNT_ICONS[a.type]
+                        return (
+                          <div key={a.id} className="bg-white rounded-xl border border-slate-200 p-3">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Icon className="w-3.5 h-3.5 text-slate-400" />
+                              <p className="text-xs text-slate-500 truncate flex-1">{a.name}</p>
+                            </div>
+                            <p className={`text-sm font-semibold tabular-nums ${final < 0 ? 'text-red-500' : 'text-slate-800'}`}>
+                              {final < 0 ? '-' : ''}{fmt(final)}
+                            </p>
+                            {diff !== 0 && (
+                              <p className={`text-xs mt-0.5 ${diff > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                                {fmtSigned(diff)} from today
+                              </p>
+                            )}
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -526,6 +885,114 @@ function ForecastTab({ accounts, categories }: { accounts: Account[]; categories
           onClose={() => { setShowForm(false); setEditingItem(null) }}
         />
       )}
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title="Delete planned transaction?"
+        message={confirmDelete ? <>This will remove <strong>{confirmDelete.label}</strong> from your forecast. This cannot be undone.</> : ''}
+        confirmLabel="Delete"
+        loading={busy}
+        onConfirm={() => confirmDelete && handleDelete(confirmDelete)}
+        onCancel={() => setConfirmDelete(null)}
+      />
+
+      {confirmConvert && (
+        <ConvertPlanModal
+          item={confirmConvert}
+          accounts={accounts}
+          loading={busy}
+          onConfirm={(amount, date) => handleConvert(confirmConvert, amount, date)}
+          onCancel={() => setConfirmConvert(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── Convert Plan Modal ────────────────────────────────────────────────────────
+
+function ConvertPlanModal({
+  item, accounts, loading, onConfirm, onCancel,
+}: {
+  item: ForecastItem
+  accounts: Account[]
+  loading: boolean
+  onConfirm: (amount: number, date: string) => void
+  onCancel: () => void
+}) {
+  const [amount, setAmount] = useState(String(item.amount))
+  const [date, setDate] = useState(item.date)
+  const [error, setError] = useState('')
+
+  const accountName = item.account_id ? accounts.find(a => a.id === item.account_id)?.name : null
+  const toAccountName = item.to_account_id ? accounts.find(a => a.id === item.to_account_id)?.name : null
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    const amt = Number.parseFloat(amount)
+    if (Number.isNaN(amt) || amt <= 0) { setError('Enter a valid positive amount'); return }
+    if (!date) { setError('Date is required'); return }
+    onConfirm(amt, date)
+  }
+
+  const typeColor = item.type === 'income' ? 'text-green-600' : item.type === 'expense' ? 'text-red-500' : 'text-blue-500'
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onCancel}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-base font-semibold text-slate-800">Convert to transaction</h3>
+          <button type="button" onClick={onCancel} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+        </div>
+        <p className="text-sm text-slate-500 mb-4">
+          Record <strong className="text-slate-700">{item.label}</strong>
+          {accountName && <> on <span className="text-slate-700">{accountName}{toAccountName ? ` → ${toAccountName}` : ''}</span></>}
+          {' '}as an actual transaction. Confirm or adjust the amount and date.
+        </p>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="convert-amount" className="block text-xs text-slate-500 mb-1">Amount</label>
+              <div className="relative">
+                <span className={`absolute left-3 top-1/2 -translate-y-1/2 text-sm ${typeColor}`}>
+                  {item.type === 'expense' ? '-' : item.type === 'income' ? '+' : ''}$
+                </span>
+                <input
+                  id="convert-amount"
+                  type="number" step="0.01" min="0.01"
+                  value={amount}
+                  onChange={e => setAmount(e.target.value)}
+                  autoFocus
+                  className="w-full pl-9 pr-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+                  required
+                />
+              </div>
+            </div>
+            <div>
+              <label htmlFor="convert-date" className="block text-xs text-slate-500 mb-1">Date</label>
+              <input
+                id="convert-date"
+                type="date"
+                value={date}
+                onChange={e => setDate(e.target.value)}
+                className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+                required
+              />
+            </div>
+          </div>
+          {error && <p className="text-red-500 text-sm">{error}</p>}
+          <div className="flex gap-3 pt-1">
+            <button type="button" onClick={onCancel} disabled={loading}
+              className="flex-1 py-2.5 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50 transition-colors">
+              Cancel
+            </button>
+            <button type="submit" disabled={loading}
+              className="flex-1 py-2.5 rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 transition-colors">
+              {loading ? 'Converting…' : 'Convert'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }
@@ -697,7 +1164,7 @@ export default function PlanningPage() {
   ]
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
+    <div className="p-8 pr-80 max-w-5xl mx-auto">
       <div className="mb-6">
         <h2 className="text-2xl font-semibold text-slate-800">Planning</h2>
       </div>

@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
+import { getServerSession } from '@/lib/server-session'
 import { encrypt, decrypt } from '@/lib/crypto'
-import { requireSessionKey } from '@/lib/session'
 import { v4 as uuidv4 } from 'uuid'
-
 interface ForecastRow {
   id: string
   type: string
@@ -32,10 +30,9 @@ function decryptPlan(row: ForecastRow, key: Buffer) {
 }
 
 export async function GET() {
-  let key: Buffer
-  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
-
-  const db = getDb()
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { key, db } = session
   const rows = db.prepare(
     'SELECT * FROM forecast_plans ORDER BY date ASC, sort_order ASC, created_at ASC'
   ).all() as ForecastRow[]
@@ -43,8 +40,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  let key: Buffer
-  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { key, db } = session
 
   const body = await req.json()
   const { type, label, amount, date, account_id, to_account_id, category_id } = body
@@ -60,7 +58,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'amount must be a positive number' }, { status: 400 })
   }
 
-  const db = getDb()
   const id = uuidv4()
   db.prepare(`
     INSERT INTO forecast_plans
@@ -81,14 +78,14 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
-  let key: Buffer
-  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { key, db } = session
 
   const body = await req.json()
   const { id, type, label, amount, date, account_id, to_account_id, category_id } = body
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
-  const db = getDb()
   const existing = db.prepare('SELECT id FROM forecast_plans WHERE id = ?').get(id)
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
@@ -111,13 +108,13 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
-  let key: Buffer
-  try { key = requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { key, db } = session
 
   const { id } = await req.json()
   if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 })
 
-  const db = getDb()
   db.prepare('DELETE FROM forecast_plans WHERE id = ?').run(id)
   return NextResponse.json({ ok: true })
 }

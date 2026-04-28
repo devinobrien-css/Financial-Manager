@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getDb } from '@/lib/db'
-import { requireSessionKey } from '@/lib/session'
+import { getServerSession } from '@/lib/server-session'
 import { v4 as uuidv4 } from 'uuid'
-
 interface PayInFullRow {
   id: string
   account_id: string
@@ -12,14 +10,15 @@ interface PayInFullRow {
 
 // GET /api/pay-in-full?month=YYYY-MM — get pay-in-full status for all credit accounts that month
 export async function GET(req: NextRequest) {
-  try { requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { db } = session
 
   const month = req.nextUrl.searchParams.get('month')
   if (!month || !/^\d{4}-\d{2}$/.test(month)) {
     return NextResponse.json({ error: 'month param required (YYYY-MM)' }, { status: 400 })
   }
 
-  const db = getDb()
   const rows = db.prepare(
     'SELECT * FROM pay_in_full_log WHERE month = ?'
   ).all(month) as PayInFullRow[]
@@ -31,7 +30,9 @@ export async function GET(req: NextRequest) {
 
 // PATCH /api/pay-in-full — upsert paid status for account + month
 export async function PATCH(req: NextRequest) {
-  try { requireSessionKey() } catch { return NextResponse.json({ error: 'LOCKED' }, { status: 401 }) }
+  const session = await getServerSession()
+  if (!session) return NextResponse.json({ error: 'LOCKED' }, { status: 401 })
+  const { db } = session
 
   const body = await req.json() as { account_id?: string; month?: string; paid?: boolean }
   const { account_id, month, paid } = body
@@ -43,7 +44,6 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'month must be YYYY-MM' }, { status: 400 })
   }
 
-  const db = getDb()
   const existing = db.prepare(
     'SELECT id FROM pay_in_full_log WHERE account_id = ? AND month = ?'
   ).get(account_id, month) as { id: string } | undefined

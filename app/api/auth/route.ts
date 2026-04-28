@@ -1,39 +1,71 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { v4 as uuidv4 } from 'uuid'
 import { getDb } from '@/lib/db'
 import { deriveKey, generateSalt, makeVerifier, verifyKey } from '@/lib/crypto'
-import { setSessionKey, clearSessionKey } from '@/lib/session'
+import { createSession, destroySession, verifyAndGetSession } from '@/lib/session'
+import { findUserByUsername, createUser } from '@/lib/user-db'
+import { COOKIE_NAME } from '@/lib/server-session'
 
 interface AuthRow {
   salt: string
   verifier_enc: string
 }
 
+const COOKIE_OPTS = {
+  httpOnly: true,
+  sameSite: 'lax' as const,
+  path: '/',
+  secure: process.env.NODE_ENV === 'production',
+  maxAge: 60 * 60 * 24 * 30, // 30 days
+}
+
 export async function POST(req: NextRequest) {
-  const { action, password } = await req.json() as { action: string; password: string }
+  const body = await req.json() as { action: string; username?: string; password?: string; registrationCode?: string }
+  const { action } = body
 
-  const db = getDb()
-
-  // status and lock don't require a password
+  // ── status ───────────────────────────────────────────────────────────────────
   if (action === 'status') {
-    const row = db.prepare('SELECT id FROM auth WHERE id = 1').get()
-    return NextResponse.json({ isSetUp: !!row })
+    const signed = req.cookies.get(COOKIE_NAME)?.value
+    if (!signed) return NextResponse.json({ loggedIn: false })
+    const entry = verifyAndGetSession(signed)
+    return NextResponse.json({ loggedIn: !!entry })
   }
 
+  // ── lock / logout ─────────────────────────────────────────────────────────────
   if (action === 'lock') {
-    clearSessionKey()
-    return NextResponse.json({ ok: true })
+    const signed = req.cookies.get(COOKIE_NAME)?.value
+    if (signed) destroySession(signed)
+    const res = NextResponse.json({ ok: true })
+    res.cookies.delete(COOKIE_NAME)
+    return res
   }
 
-  if (!password || typeof password !== 'string' || password.length < 1) {
-    return NextResponse.json({ error: 'Password required' }, { status: 400 })
+  const { username, password } = body
+  if (!username?.trim() || !password || password.length < 1) {
+    return NextResponse.json({ error: 'Username and password are required' }, { status: 400 })
   }
 
-  if (action === 'setup') {
-    // First-time setup: create salt + verifier
-    const existing = db.prepare('SELECT id FROM auth WHERE id = 1').get()
-    if (existing) {
-      return NextResponse.json({ error: 'Already set up' }, { status: 409 })
+  // ── register ──────────────────────────────────────────────────────────────────
+  if (action === 'register') {
+    if (password.length < 8) {
+      return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 })
     }
+    // Optional registration code gate
+    const requiredCode = process.env.REGISTRATION_CODE
+    if (requiredCode && body.registrationCode !== requiredCode) {
+      return NextResponse.json({ error: 'Invalid registration code' }, { status: 403 })
+    }
+
+    const existing = findUserByUsername(username)
+    if (existing) {
+      return NextResponse.json({ error: 'Username already taken' }, { status: 409 })
+    }
+
+    const userId = uuidv4()
+    createUser(userId, username.trim())
+
+    // Initialize auth record in the user's own DB
+    const db = getDb(userId)
     const salt = generateSalt()
     const key = deriveKey(password, salt)
     const verifier = makeVerifier(key)
@@ -41,22 +73,36 @@ export async function POST(req: NextRequest) {
       salt.toString('base64'),
       verifier
     )
-    setSessionKey(key)
-    return NextResponse.json({ ok: true })
+
+    const signed = createSession(userId, key)
+    const res = NextResponse.json({ ok: true, username: username.trim() })
+    res.cookies.set(COOKIE_NAME, signed, COOKIE_OPTS)
+    return res
   }
 
-  if (action === 'unlock') {
+  // ── login ─────────────────────────────────────────────────────────────────────
+  if (action === 'login') {
+    const user = findUserByUsername(username)
+    if (!user) {
+      return NextResponse.json({ error: 'Invalid username or password' }, { status: 401 })
+    }
+
+    const db = getDb(user.id)
     const row = db.prepare('SELECT salt, verifier_enc FROM auth WHERE id = 1').get() as AuthRow | undefined
     if (!row) {
-      return NextResponse.json({ error: 'Not set up yet' }, { status: 404 })
+      return NextResponse.json({ error: 'Account not fully set up' }, { status: 500 })
     }
+
     const salt = Buffer.from(row.salt, 'base64')
     const key = deriveKey(password, salt)
     if (!verifyKey(row.verifier_enc, key)) {
-      return NextResponse.json({ error: 'Invalid password' }, { status: 401 })
+      return NextResponse.json({ error: 'Invalid username or password' }, { status: 401 })
     }
-    setSessionKey(key)
-    return NextResponse.json({ ok: true })
+
+    const signed = createSession(user.id, key)
+    const res = NextResponse.json({ ok: true, username: user.username })
+    res.cookies.set(COOKIE_NAME, signed, COOKIE_OPTS)
+    return res
   }
 
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
