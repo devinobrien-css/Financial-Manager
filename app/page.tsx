@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
-import { TrendingUp, TrendingDown, DollarSign, ChevronLeft, ChevronRight, Landmark, Activity } from 'lucide-react'
+import { useEffect, useRef, useState, useCallback } from 'react'
+import { TrendingUp, TrendingDown, DollarSign, ChevronLeft, ChevronRight, Landmark, Activity, PlusCircle, Eye, X } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
@@ -69,8 +69,20 @@ export default function DashboardPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
-  const [trendData, setTrendData] = useState<Array<{ month: string; label: string; income: number; expenses: number; debtPaid: number; savings: number; rate: number }>>([])
+  const [trendData, setTrendData] = useState<Array<{ month: string; label: string; income: number; expenses: number; debtPaid: number; otherOutflow: number; savings: number; rate: number }>>([])
   const [prevCatMap, setPrevCatMap] = useState<Record<string, { name: string; value: number; color: string }>>({})
+  const [showBalanceInquiry, setShowBalanceInquiry] = useState(false)
+  const [showQuickLog, setShowQuickLog] = useState(false)
+  const qlAmountRef = useRef<HTMLInputElement>(null)
+  useEffect(() => { if (showQuickLog) qlAmountRef.current?.focus({ preventScroll: true }) }, [showQuickLog])
+  const [qlType, setQlType] = useState<'expense' | 'income' | 'transfer'>('expense')
+  const [qlAmount, setQlAmount] = useState('')
+  const [qlDesc, setQlDesc] = useState('')
+  const [qlCat, setQlCat] = useState('')
+  const [qlAccount, setQlAccount] = useState('')
+  const [qlDate, setQlDate] = useState(new Date().toISOString().slice(0, 10))
+  const [qlSaving, setQlSaving] = useState(false)
+  const [qlError, setQlError] = useState('')
 
   const load = useCallback(async (m: string) => {
     setLoading(true)
@@ -105,18 +117,27 @@ export default function DashboardPage() {
       acList.filter(a => a.type === 'checking' || a.type === 'savings' || a.type === 'investment').map(a => a.id),
     )
     const debtAcctIds = new Set(acList.filter(a => a.type === 'credit' || a.type === 'loan').map(a => a.id))
+    // Only exclude transfers to savings/investment accounts (user's own savings vehicles).
+    // Transfers to checking/cash could be external payees (rent, etc.) so they count as outflows.
+    const assetAcctIds = new Set(acList.filter(a => a.type === 'savings' || a.type === 'investment').map(a => a.id))
     const trend = results.map((txs, i) => {
       const inc = txs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
       const exp = txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
-      // Transfers OUT of savings pool to credit/loan = debt paydown.
+      // Transfers to credit/loan = debt paydown.
       const debtPaid = txs
         .filter(t => t.type === 'transfer'
-          && t.account_id && savingsPoolIds.has(t.account_id)
           && t.to_account_id && debtAcctIds.has(t.to_account_id))
         .reduce((s, t) => s + t.amount, 0)
-      const sav = inc - exp - debtPaid
+      // Transfers to external accounts (rent, bills paid via transfer, etc.) = real outflows.
+      const otherOutflow = txs
+        .filter(t => t.type === 'transfer'
+          && t.to_account_id
+          && !debtAcctIds.has(t.to_account_id)
+          && !assetAcctIds.has(t.to_account_id))
+        .reduce((s, t) => s + t.amount, 0)
+      const sav = inc - exp - debtPaid - otherOutflow
       const rate = inc > 0 ? Math.round((sav / inc) * 100) : 0
-      return { month: months[i], label: shortMonth(months[i]), income: inc, expenses: exp, debtPaid, savings: sav, rate }
+      return { month: months[i], label: shortMonth(months[i]), income: inc, expenses: exp, debtPaid, otherOutflow, savings: sav, rate }
     })
     setTrendData(trend)
     // prev month = results[4] (5th of 6 = one month before current)
@@ -145,17 +166,26 @@ export default function DashboardPage() {
 
   const income = transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
   const expenses = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
-  const net = income - expenses
   const netWorth = accounts.reduce((s, a) => s + a.balance, 0)
   const hasAccounts = accounts.length > 0
 
   // Debt account IDs (credit + loan)
   const debtAccountIds = new Set(accounts.filter(a => a.type === 'credit' || a.type === 'loan').map(a => a.id))
 
+  // Only treat savings/investment as internal destinations — checking/cash could be external payees (landlord, etc.)
+  const assetAccountIds = new Set(accounts.filter(a => a.type === 'savings' || a.type === 'investment').map(a => a.id))
+
   // Savings pool IDs (checking + savings + investment)
   const savingsPoolIds = new Set(
     accounts.filter(a => a.type === 'checking' || a.type === 'savings' || a.type === 'investment').map(a => a.id),
   )
+
+  // Transfers to external accounts (rent, bills, etc.) = real outflows not captured as expenses
+  const otherOutflows = transactions
+    .filter(t => t.type === 'transfer' && t.to_account_id && !debtAccountIds.has(t.to_account_id) && !assetAccountIds.has(t.to_account_id))
+    .reduce((s, t) => s + t.amount, 0)
+
+  const net = income - expenses - otherOutflows
 
   // Transfers going TO a debt account = debt payments
   const debtPayments = transactions
@@ -295,7 +325,7 @@ export default function DashboardPage() {
 
   const cards = [
     { label: 'Income', value: fmt(income), color: 'text-green-600', icon: TrendingUp, bg: 'bg-green-50' },
-    { label: 'Expenses', value: fmt(expenses), color: 'text-red-500', icon: TrendingDown, bg: 'bg-red-50' },
+    { label: 'Expenses', value: fmt(expenses + otherOutflows), color: 'text-red-500', icon: TrendingDown, bg: 'bg-red-50' },
     { label: 'Net This Month', value: fmt(net), color: net >= 0 ? 'text-green-600' : 'text-red-500', icon: DollarSign, bg: 'bg-slate-50' },
     ...(hasAccounts ? [{ label: 'Net Worth', value: fmt(netWorth), color: netWorth >= 0 ? 'text-green-600' : 'text-red-500', icon: Landmark, bg: 'bg-indigo-50' }] : []),
   ]
@@ -370,11 +400,228 @@ export default function DashboardPage() {
   const healthScoreColor = healthScore >= 80 ? 'text-green-600' : healthScore >= 60 ? 'text-yellow-600' : 'text-red-500'
   const healthScoreLabel = healthScore >= 80 ? 'Excellent' : healthScore >= 60 ? 'Good' : healthScore >= 40 ? 'Fair' : 'Needs Attention'
 
+  const totalBalance = accounts.reduce((s, a) => s + a.balance, 0)
+
+  function openQuickLog() {
+    setQlType('expense')
+    setQlAmount('')
+    setQlDesc('')
+    setQlCat('')
+    setQlAccount('')
+    setQlDate(new Date().toISOString().slice(0, 10))
+    setQlError('')
+    setShowQuickLog(true)
+  }
+
+  async function submitQuickLog(e: React.FormEvent) {
+    e.preventDefault()
+    setQlSaving(true)
+    setQlError('')
+    try {
+      const res = await fetch('/api/transactions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: qlType,
+          amount: qlAmount,
+          description: qlDesc || undefined,
+          category_id: qlCat ? Number(qlCat) : undefined,
+          account_id: qlAccount || undefined,
+          date: qlDate,
+        }),
+      })
+      if (!res.ok) {
+        const j = await res.json()
+        setQlError(j.error ?? 'Failed to save')
+      } else {
+        setShowQuickLog(false)
+        load(month)
+      }
+    } catch {
+      setQlError('Network error')
+    } finally {
+      setQlSaving(false)
+    }
+  }
+
   return (
-    <div className="p-8 max-w-5xl mx-auto">
+    <div className="p-4 md:p-6 lg:p-8 max-w-6xl mx-auto">
+      {/* Mobile quick actions */}
+      <div className="md:hidden grid grid-cols-2 gap-3 mb-6">
+        <button
+          onClick={openQuickLog}
+          className="flex flex-col items-center justify-center gap-2 bg-slate-800 text-white rounded-2xl py-5 active:opacity-80 transition-opacity"
+        >
+          <PlusCircle className="w-7 h-7" />
+          <span className="text-sm font-medium">Log Transaction</span>
+        </button>
+        <button
+          onClick={() => setShowBalanceInquiry(true)}
+          className="flex flex-col items-center justify-center gap-2 bg-white border border-slate-200 text-slate-800 rounded-2xl py-5 active:opacity-80 transition-opacity"
+        >
+          <Eye className="w-7 h-7" />
+          <span className="text-sm font-medium">Balance Inquiry</span>
+        </button>
+      </div>
+
+      {/* Quick-log transaction modal */}
+      {showQuickLog && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-end justify-center">
+          <div className="bg-white w-full rounded-t-2xl shadow-xl max-h-[90vh] flex flex-col animate-sheet-up">
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100">
+              <h3 className="text-base font-semibold text-slate-800">Log Transaction</h3>
+              <button onClick={() => setShowQuickLog(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={submitQuickLog} className="overflow-y-auto flex-1 px-5 py-4 space-y-4">
+              {/* Type toggle */}
+              <div className="flex rounded-xl overflow-hidden border border-slate-200">
+                {(['expense', 'income', 'transfer'] as const).map(t => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => { setQlType(t); setQlCat('') }}
+                    className={`flex-1 py-2.5 text-sm font-medium transition-colors ${
+                      qlType === t
+                        ? t === 'expense' ? 'bg-red-500 text-white'
+                          : t === 'income' ? 'bg-green-500 text-white'
+                          : 'bg-slate-600 text-white'
+                        : 'bg-white text-slate-500'
+                    }`}
+                  >
+                    {t.charAt(0).toUpperCase() + t.slice(1)}
+                  </button>
+                ))}
+              </div>
+
+              {/* Amount */}
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Amount ($)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  placeholder="0.00"
+                  value={qlAmount}
+                  onChange={e => setQlAmount(e.target.value)}
+                  className="w-full px-3 py-3 rounded-xl border border-slate-200 text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-slate-300"
+                  required
+                  ref={qlAmountRef}
+                />
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Description (optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Grocery run"
+                  value={qlDesc}
+                  onChange={e => setQlDesc(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+                />
+              </div>
+
+              {/* Category — hide for transfers */}
+              {qlType !== 'transfer' && categories.filter(c => c.type === qlType || c.type === 'both').length > 0 && (
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Category</label>
+                  <select
+                    value={qlCat}
+                    onChange={e => setQlCat(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white"
+                  >
+                    <option value="">— No category —</option>
+                    {categories.filter(c => c.type === qlType || c.type === 'both').map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Account */}
+              {accounts.length > 0 && (
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">Account (optional)</label>
+                  <select
+                    value={qlAccount}
+                    onChange={e => setQlAccount(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white"
+                  >
+                    <option value="">— No account —</option>
+                    {accounts.map(a => (
+                      <option key={a.id} value={a.id}>{a.name} ({fmt(a.balance)})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Date */}
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Date</label>
+                <input
+                  type="date"
+                  value={qlDate}
+                  onChange={e => setQlDate(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+                  required
+                />
+              </div>
+
+              {qlError && <p className="text-xs text-red-500">{qlError}</p>}
+
+              <button
+                type="submit"
+                disabled={qlSaving}
+                className="w-full py-3 rounded-xl bg-slate-800 text-white text-sm font-semibold disabled:opacity-60 active:opacity-80 transition-opacity"
+              >
+                {qlSaving ? 'Saving…' : 'Save Transaction'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Balance inquiry modal */}
+      {showBalanceInquiry && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-end md:items-center justify-center p-0 md:p-4">
+          <div className="bg-white w-full md:max-w-sm rounded-t-2xl md:rounded-2xl shadow-xl max-h-[80vh] flex flex-col animate-sheet-up md:animate-scale-in">
+            <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-slate-100">
+              <h3 className="text-base font-semibold text-slate-800">Account Balances</h3>
+              <button onClick={() => setShowBalanceInquiry(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto flex-1 divide-y divide-slate-100">
+              {accounts.map(a => (
+                <div key={a.id} className="flex items-center justify-between px-5 py-3.5">
+                  <div>
+                    <p className="text-sm font-medium text-slate-800">{a.name}</p>
+                    <p className="text-xs text-slate-400 capitalize">{a.type.replaceAll('_', ' ')}</p>
+                  </div>
+                  <span className={`text-sm font-semibold tabular-nums ${a.balance < -0.005 ? 'text-red-500' : 'text-slate-800'}`}>
+                    {a.balance < -0.005 ? '-' : ''}{fmt(Math.abs(a.balance))}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="px-5 py-4 border-t border-slate-100 flex items-center justify-between">
+              <span className="text-sm text-slate-500">Net balance</span>
+              <span className={`text-base font-semibold tabular-nums ${totalBalance < -0.005 ? 'text-red-500' : 'text-slate-800'}`}>
+                {totalBalance < -0.005 ? '-' : ''}{fmt(Math.abs(totalBalance))}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header + month nav */}
-      <div className="flex items-center justify-between mb-8">
-        <h2 className="text-2xl font-semibold text-slate-800">Dashboard</h2>
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-8">
+        <div>
+          <h2 className="text-2xl font-semibold text-slate-800">Dashboard</h2>
+          <p className="text-sm text-slate-500 mt-1">Your monthly financial overview and spending summary.</p>
+        </div>
         <div className="flex items-center gap-2">
           <button onClick={prevMonth} className="p-1.5 rounded-lg hover:bg-slate-200 transition-colors">
             <ChevronLeft className="w-4 h-4 text-slate-600" />
@@ -435,9 +682,9 @@ export default function DashboardPage() {
           )}
 
           {/* Summary cards */}
-          <div className={`grid gap-4 mb-4 ${hasAccounts ? 'grid-cols-4' : 'grid-cols-3'}`}>
-            {cards.map(({ label, value, color, icon: Icon, bg }) => (
-              <div key={label} className="bg-white rounded-xl border border-slate-200 p-5">
+          <div className={`grid gap-4 mb-4 ${hasAccounts ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-2 md:grid-cols-3'}`}>
+            {cards.map(({ label, value, color, icon: Icon, bg }, i) => (
+              <div key={label} className="bg-white rounded-xl border border-slate-200 p-5 card-hover animate-slide-up" style={{ animationDelay: `${i * 60}ms` }}>
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-sm text-slate-500">{label}</span>
                   <div className={`${bg} rounded-lg p-2`}>
@@ -456,8 +703,8 @@ export default function DashboardPage() {
 
           {/* Financial Pulse row */}
           {(income > 0 || expenses > 0) && (
-            <div className="grid grid-cols-4 gap-4 mb-8">
-              <div className="bg-white rounded-xl border border-slate-200 p-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+              <div className="bg-white rounded-xl border border-slate-200 p-4 card-hover animate-slide-up anim-delay-1">
                 <div className="flex items-center gap-2 mb-2">
                   <Activity className="w-3.5 h-3.5 text-indigo-400" />
                   <span className="text-xs text-slate-500">Monthly Health Score</span>
@@ -557,7 +804,7 @@ export default function DashboardPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-6 mb-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
             {/* Daily bar chart */}
             <div className="bg-white rounded-xl border border-slate-200 p-5">
               <h3 className="text-sm font-medium text-slate-700 mb-4">Daily Activity</h3>
@@ -607,7 +854,7 @@ export default function DashboardPage() {
           </div>
 
           {/* 6-Month Trend + Monthly Savings Rate */}
-          <div className="grid grid-cols-2 gap-6 mb-8">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
             <div className="bg-white rounded-xl border border-slate-200 p-5">
               <h3 className="text-sm font-medium text-slate-700 mb-4">6-Month Trend</h3>
               {trendData.length === 0 ? (
@@ -621,6 +868,7 @@ export default function DashboardPage() {
                     <Tooltip formatter={(v: number) => fmt(v)} />
                     <Bar dataKey="income" fill="#bbf7d0" name="Income" radius={[3, 3, 0, 0]} />
                     <Bar dataKey="expenses" fill="#fecaca" name="Expenses" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="otherOutflow" fill="#fed7aa" name="Other Outflows" radius={[3, 3, 0, 0]} />
                     <Bar dataKey="debtPaid" fill="#bfdbfe" name="Debt Paydown" radius={[3, 3, 0, 0]} />
                     <Line type="monotone" dataKey="savings" stroke="#6366f1" strokeWidth={2} dot={false} name="Saved" />
                   </ComposedChart>
@@ -726,7 +974,7 @@ export default function DashboardPage() {
           )}
 
           {/* Day-of-Week Spending + Income Sources */}
-          <div className="grid grid-cols-2 gap-6 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
             <div className="bg-white rounded-xl border border-slate-200 p-5">
               <h3 className="text-sm font-medium text-slate-700 mb-4">Spending by Day of Week</h3>
               {dowSpending.every(d => d.amount === 0) ? (
@@ -783,7 +1031,7 @@ export default function DashboardPage() {
 
           {/* Assets vs. Debt + Debt Payoff Progress */}
           {(assetVsDebtData.length > 1 || debtProgress.length > 0) && (
-            <div className={`grid gap-6 mb-6 ${assetVsDebtData.length > 1 && debtProgress.length > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            <div className={`grid gap-6 mb-6 ${assetVsDebtData.length > 1 && debtProgress.length > 0 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
               {assetVsDebtData.length > 1 && (
                 <div className="bg-white rounded-xl border border-slate-200 p-5 flex flex-col">
                   <h3 className="text-sm font-medium text-slate-700 mb-2">Assets vs. Debt</h3>

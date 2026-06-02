@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Plus, Trash2, X, Wallet, CreditCard, Banknote, PiggyBank, Landmark, Pencil, GripVertical, ChevronDown, FileText, ArrowRight, TrendingUp } from 'lucide-react'
+import { Plus, Trash2, X, Wallet, CreditCard, Banknote, PiggyBank, Landmark, Pencil, GripVertical, ChevronDown, FileText, ArrowRight, TrendingUp, ClipboardCheck, CheckCircle2, AlertCircle } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import { useAuth } from '@/lib/auth-context'
 import {
@@ -105,7 +105,7 @@ function StatementModal({ accountId, accounts, onClose }: {
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
       onKeyDown={e => { if (e.key === 'Escape') onClose() }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col" style={{ maxHeight: '88vh' }}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl flex flex-col animate-scale-in" style={{ maxHeight: '88vh' }}>
         {/* Modal header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 flex-shrink-0">
           <div>
@@ -124,8 +124,8 @@ function StatementModal({ accountId, accounts, onClose }: {
           <div className="flex gap-4 px-6 py-4 border-b border-slate-100 flex-shrink-0">
             <div className="bg-white rounded-xl border border-slate-200 px-4 py-3">
               <p className="text-xs text-slate-400">Current Balance</p>
-              <p className={`text-lg font-semibold tabular-nums ${account.balance < 0 ? 'text-red-500' : 'text-slate-800'}`}>
-                {account.balance < 0 ? '-' : ''}{fmt(account.balance)}
+              <p className={`text-lg font-semibold tabular-nums ${account.balance < -0.005 ? 'text-red-500' : 'text-slate-800'}`}>
+                {account.balance < -0.005 ? '-' : ''}{fmt(Math.abs(account.balance))}
               </p>
             </div>
             <div className="bg-green-50 rounded-xl border border-green-100 px-4 py-3">
@@ -267,7 +267,7 @@ function SortableAccountRow({ account, onEdit, onDelete, onViewStatement, deleti
 
   const Icon = ACCOUNT_ICONS[account.type]
   const isDebt = account.type === 'credit' || account.type === 'loan'
-  const isNegative = account.balance < 0
+  const isNegative = account.balance < -0.005
   const isPaidOff = isDebt && !isNegative
   const balanceColor = isNegative ? 'text-red-500' : 'text-slate-400'
 
@@ -284,48 +284,56 @@ function SortableAccountRow({ account, onEdit, onDelete, onViewStatement, deleti
         isPaidOff ? 'border-slate-100 opacity-50' : 'border-slate-200'
       }`}
     >
-      <div className="p-5 flex items-center justify-between">
-      <div className="flex items-center gap-3">
+      <div className="p-4 flex items-center gap-2 sm:gap-3">
         {/* Drag handle */}
         <button
           {...attributes}
           {...listeners}
-          className="text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing touch-none"
+          className="text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing touch-none shrink-0"
           aria-label="Drag to reorder"
           tabIndex={-1}
         >
           <GripVertical className="w-4 h-4" />
         </button>
-        <div className={`rounded-xl p-3 ${isPaidOff ? 'bg-slate-100 text-slate-400' : ACCOUNT_COLORS[account.type]}`}>
-          <Icon className="w-5 h-5" />
+
+        {/* Icon */}
+        <div className={`rounded-xl p-2.5 sm:p-3 shrink-0 ${isPaidOff ? 'bg-slate-100 text-slate-400' : ACCOUNT_COLORS[account.type]}`}>
+          <Icon className="w-4 h-4 sm:w-5 sm:h-5" />
         </div>
-        <div>
-          <div className="flex items-center gap-2">
-            <p className={`font-medium ${isPaidOff ? 'text-slate-400' : 'text-slate-800'}`}>{account.name}</p>
+
+        {/* Name + type — grows, truncates */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5">
+            <p className={`font-medium text-sm truncate ${isPaidOff ? 'text-slate-400' : 'text-slate-800'}`}>{account.name}</p>
             {account.apr !== null && !isPaidOff && (
-              <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-orange-100 text-orange-600">
+              <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-orange-100 text-orange-600 shrink-0 hidden sm:inline">
                 {account.apr}% APR
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-400 mt-0.5">{ACCOUNT_LABELS[account.type]}</p>
+          <p className="text-xs text-slate-400 mt-0.5 truncate">
+            {ACCOUNT_LABELS[account.type]}
+            {account.apr !== null && !isPaidOff && <span className="sm:hidden"> · {account.apr}% APR</span>}
+          </p>
         </div>
-      </div>
-      <div className="flex items-center gap-6">
-        <div className="text-right">
-          <p className={`text-lg font-semibold tabular-nums ${balanceColor}`}>
+
+        {/* Balance — shrink-0 */}
+        <div className="text-right shrink-0">
+          <p className={`text-sm sm:text-base font-semibold tabular-nums ${balanceColor}`}>
             {isNegative ? '-' : ''}{Math.abs(account.balance).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
           </p>
           <p className="text-xs text-slate-400">
             {isDebt ? (isNegative ? 'You owe' : 'Paid off') : 'Balance'}
           </p>
           {account.monthly_interest !== null && account.monthly_interest > 0 && (
-            <p className="text-xs text-orange-500 mt-0.5">
-              ~{Math.abs(account.monthly_interest).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}/mo interest
+            <p className="text-xs text-orange-500 mt-0.5 hidden sm:block">
+              ~{Math.abs(account.monthly_interest).toLocaleString('en-US', { style: 'currency', currency: 'USD' })}/mo
             </p>
           )}
         </div>
-        <div className="flex items-center gap-3">
+
+        {/* Actions — shrink-0 */}
+        <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
           <button
             onClick={() => onViewStatement(account.id)}
             className="text-slate-300 hover:text-slate-600 transition-colors"
@@ -348,7 +356,6 @@ function SortableAccountRow({ account, onEdit, onDelete, onViewStatement, deleti
             <Trash2 className="w-4 h-4" />
           </button>
         </div>
-      </div>
       </div>
 
       {showUtilization && (
@@ -447,6 +454,273 @@ function AccountGroup({ group, accounts, onReorder, onEdit, onDelete, onViewStat
   )
 }
 
+// ─── Accounts Review Wizard ──────────────────────────────────────────────────
+
+type ReviewStatus = 'pending' | 'balanced' | 'adjusted' | 'skipped'
+
+interface ReviewResult {
+  account: Account
+  actualBalance: number | null
+  status: ReviewStatus
+  diff: number
+}
+
+function AccountsReviewWizard({ accounts, onClose, onDone }: {
+  accounts: Account[]
+  onClose: () => void
+  onDone: () => void
+}) {
+  const reviewable = accounts.filter(a => a.type !== 'investment')
+  const [step, setStep] = useState(0)
+  const [results, setResults] = useState<ReviewResult[]>(
+    () => reviewable.map(a => ({ account: a, actualBalance: null, status: 'pending', diff: 0 }))
+  )
+  const [inputVal, setInputVal] = useState('')
+  const [phase, setPhase] = useState<'check' | 'adjust' | 'summary'>('check')
+  const balanceInputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => { balanceInputRef.current?.focus({ preventScroll: true }) }, [step, phase])
+  const [adjustDesc, setAdjustDesc] = useState('Balance adjustment')
+  const [saving, setSaving] = useState(false)
+
+  const account = reviewable[step]
+  const result = results[step]
+  const isDebt = account && (account.type === 'credit' || account.type === 'loan')
+  const recordedDisplay = account ? Math.abs(account.balance) : 0
+
+  const advance = useCallback((nextStep: number) => {
+    setInputVal('')
+    setAdjustDesc('Balance adjustment')
+    if (nextStep >= reviewable.length) {
+      setPhase('summary')
+    } else {
+      setStep(nextStep)
+      setPhase('check')
+    }
+  }, [reviewable.length])
+
+  const handleCheckBalance = () => {
+    const actual = parseFloat(inputVal)
+    if (isNaN(actual) || actual < 0) return
+    const actualInternal = isDebt ? -actual : actual
+    const diff = actualInternal - account.balance
+    const balanced = Math.abs(diff) < 0.005
+    setResults(r => r.map((x, i) => i === step ? { ...x, actualBalance: actual, diff, status: balanced ? 'balanced' : 'pending' } : x))
+    if (balanced) {
+      setTimeout(() => advance(step + 1), 600)
+    } else {
+      setPhase('adjust')
+    }
+  }
+
+  const handleSkip = () => {
+    setResults(r => r.map((x, i) => i === step ? { ...x, status: 'skipped' } : x))
+    advance(step + 1)
+  }
+
+  const handleAdjust = async () => {
+    if (!result || result.actualBalance === null) return
+    setSaving(true)
+    const type = result.diff > 0 ? 'income' : 'expense'
+    const amount = Math.abs(result.diff)
+    const today = new Date().toISOString().slice(0, 10)
+    await fetch('/api/transactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type, amount: amount.toFixed(2), description: adjustDesc, account_id: account.id, date: today }),
+    })
+    setSaving(false)
+    setResults(r => r.map((x, i) => i === step ? { ...x, status: 'adjusted' } : x))
+    advance(step + 1)
+  }
+
+  const handleSkipAdjust = () => {
+    setResults(r => r.map((x, i) => i === step ? { ...x, status: 'skipped' } : x))
+    advance(step + 1)
+  }
+
+  const fmtAbs = (n: number) => Math.abs(n).toLocaleString('en-US', { style: 'currency', currency: 'USD' })
+
+  if (phase === 'summary') {
+    const adjusted = results.filter(r => r.status === 'adjusted')
+    const balanced = results.filter(r => r.status === 'balanced')
+    const skipped = results.filter(r => r.status === 'skipped')
+    return (
+      <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+        <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-xl p-6 animate-sheet-up sm:animate-scale-in">
+          <div className="flex flex-col items-center text-center mb-6">
+            <div className="w-14 h-14 rounded-full bg-green-50 flex items-center justify-center mb-3">
+              <CheckCircle2 className="w-8 h-8 text-green-500" />
+            </div>
+            <h3 className="text-lg font-semibold text-slate-800">Review Complete</h3>
+            <p className="text-sm text-slate-500 mt-1">Here's a summary of your account review.</p>
+          </div>
+          <div className="space-y-2 mb-6">
+            {balanced.length > 0 && (
+              <div className="flex items-center gap-3 bg-green-50 rounded-xl px-4 py-3">
+                <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
+                <p className="text-sm text-slate-700"><span className="font-semibold">{balanced.length}</span> account{balanced.length !== 1 ? 's' : ''} balanced</p>
+              </div>
+            )}
+            {adjusted.length > 0 && (
+              <div className="flex items-start gap-3 bg-blue-50 rounded-xl px-4 py-3">
+                <ClipboardCheck className="w-5 h-5 text-blue-500 shrink-0 mt-0.5" />
+                <div className="text-sm text-slate-700">
+                  <p><span className="font-semibold">{adjusted.length}</span> adjustment{adjusted.length !== 1 ? 's' : ''} created</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {adjusted.map(r => (
+                      <li key={r.account.id} className="text-xs text-slate-500">
+                        {r.account.name}: <span className={r.diff > 0 ? 'text-green-600' : 'text-red-500'}>{r.diff > 0 ? '+' : '-'}{fmtAbs(r.diff)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+            {skipped.length > 0 && (
+              <div className="flex items-center gap-3 bg-slate-50 rounded-xl px-4 py-3">
+                <AlertCircle className="w-5 h-5 text-slate-400 shrink-0" />
+                <p className="text-sm text-slate-500"><span className="font-semibold">{skipped.length}</span> account{skipped.length !== 1 ? 's' : ''} skipped</p>
+              </div>
+            )}
+          </div>
+          <button onClick={onDone} className="w-full bg-slate-800 text-white rounded-xl py-3 text-sm font-medium hover:bg-slate-700 transition-colors">
+            Done
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  const Icon = ACCOUNT_ICONS[account.type] ?? Wallet
+  const progress = (step / reviewable.length) * 100
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+      <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-xl animate-sheet-up sm:animate-scale-in">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 pt-5 pb-3">
+          <div>
+            <p className="text-xs text-slate-400 font-medium uppercase tracking-wider">Account Review</p>
+            <p className="text-sm text-slate-500">{step + 1} of {reviewable.length}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+        </div>
+
+        {/* Progress bar */}
+        <div className="h-1 bg-slate-100 mx-5 rounded-full mb-5 overflow-hidden">
+          <div className="h-full bg-indigo-500 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
+        </div>
+
+        <div className="px-5 pb-6">
+          {/* Account identity */}
+          <div className="flex items-center gap-3 mb-5">
+            <div className={`rounded-xl p-3 shrink-0 ${ACCOUNT_COLORS[account.type]}`}>
+              <Icon className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="font-semibold text-slate-800">{account.name}</p>
+              <p className="text-xs text-slate-400">{ACCOUNT_LABELS[account.type]}</p>
+            </div>
+          </div>
+
+          {/* Recorded balance */}
+          <div className="bg-slate-50 rounded-xl px-4 py-3 mb-5">
+            <p className="text-xs text-slate-400 mb-0.5">Recorded balance</p>
+            <p className={`text-xl font-semibold tabular-nums ${account.balance < -0.005 ? 'text-red-500' : 'text-slate-800'}`}>
+              {account.balance < -0.005 ? '-' : ''}{recordedDisplay.toLocaleString('en-US', { style: 'currency', currency: 'USD' })}
+            </p>
+            {isDebt && <p className="text-xs text-slate-400 mt-0.5">amount you owe</p>}
+          </div>
+
+          {phase === 'check' && (
+            <>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                What does your {isDebt ? 'statement' : 'bank'} show?
+              </label>
+              <div className="relative mb-4">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="0.00"
+                  value={inputVal}
+                  onChange={e => setInputVal(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && inputVal) handleCheckBalance() }}
+                  className="w-full pl-7 pr-4 py-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  ref={balanceInputRef}
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleCheckBalance}
+                  disabled={!inputVal}
+                  className="flex-1 bg-slate-800 text-white rounded-xl py-3 text-sm font-medium hover:bg-slate-700 transition-colors disabled:opacity-40"
+                >
+                  Check Balance
+                </button>
+                <button
+                  onClick={handleSkip}
+                  className="px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-500 hover:bg-slate-50 transition-colors"
+                >
+                  Skip
+                </button>
+              </div>
+            </>
+          )}
+
+          {phase === 'adjust' && result && result.actualBalance !== null && (
+            <>
+              <div className={`rounded-xl px-4 py-3 mb-4 flex items-start gap-3 ${result.diff > 0 ? 'bg-green-50 border border-green-100' : 'bg-red-50 border border-red-100'}`}>
+                <AlertCircle className={`w-5 h-5 mt-0.5 shrink-0 ${result.diff > 0 ? 'text-green-500' : 'text-red-400'}`} />
+                <div>
+                  <p className="text-sm font-medium text-slate-800">
+                    {result.diff > 0 ? 'Balance is higher than recorded' : 'Balance is lower than recorded'}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Difference:{' '}
+                    <span className={`font-semibold ${result.diff > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                      {result.diff > 0 ? '+' : '-'}{fmtAbs(result.diff)}
+                    </span>
+                  </p>
+                </div>
+              </div>
+              <p className="text-sm text-slate-600 mb-3">
+                Create a <strong>{result.diff > 0 ? 'income' : 'expense'}</strong> of{' '}
+                <strong>{fmtAbs(result.diff)}</strong> to reconcile?
+              </p>
+              <div className="mb-4">
+                <label className="block text-xs text-slate-500 mb-1">Description</label>
+                <input
+                  type="text"
+                  value={adjustDesc}
+                  onChange={e => setAdjustDesc(e.target.value)}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleAdjust}
+                  disabled={saving}
+                  className="flex-1 bg-slate-800 text-white rounded-xl py-3 text-sm font-medium hover:bg-slate-700 transition-colors disabled:opacity-50"
+                >
+                  {saving ? 'Saving…' : 'Create Adjustment'}
+                </button>
+                <button
+                  onClick={handleSkipAdjust}
+                  className="px-4 py-3 rounded-xl border border-slate-200 text-sm text-slate-500 hover:bg-slate-50 transition-colors"
+                >
+                  Skip
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function AccountsPage() {
   const { lock } = useAuth()
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -456,6 +730,9 @@ export default function AccountsPage() {
   const [statementAccountId, setStatementAccountId] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
+  const formNameRef = useRef<HTMLInputElement>(null)
+  useEffect(() => { if (showForm) formNameRef.current?.focus({ preventScroll: true }) }, [showForm])
+  const [showReview, setShowReview] = useState(false)
 
   // Form state
   const [formName, setFormName] = useState('')
@@ -579,36 +856,48 @@ export default function AccountsPage() {
   }
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
-        <h2 className="text-2xl font-semibold text-slate-800">Accounts</h2>
-        <button
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 bg-slate-800 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-slate-700 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Add Account
-        </button>
+    <div className="p-4 md:p-6 lg:p-8 max-w-6xl mx-auto">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-8">
+        <div>
+          <h2 className="text-2xl font-semibold text-slate-800">Accounts</h2>
+          <p className="text-sm text-slate-500 mt-1">Manage your accounts and track balances over time.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowReview(true)}
+            className="flex items-center gap-2 bg-indigo-50 text-indigo-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-indigo-100 transition-colors border border-indigo-200"
+          >
+            <ClipboardCheck className="w-4 h-4" />
+            Accounts Review
+          </button>
+          <button
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-2 bg-slate-800 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-slate-700 transition-colors btn-press"
+          >
+            <Plus className="w-4 h-4" />
+            Add Account
+          </button>
+        </div>
       </div>
 
       {/* Summary row */}
-      <div className={`grid gap-4 mb-8 ${totalMonthlyInterest > 0 ? 'grid-cols-4' : 'grid-cols-3'}`}>
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
+      <div className={`grid gap-4 mb-8 ${totalMonthlyInterest > 0 ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-2 md:grid-cols-3'}`}>
+        <div className="bg-white rounded-xl border border-slate-200 p-5 card-hover animate-slide-up">
           <p className="text-xs text-slate-500 mb-1">Total Assets</p>
           <p className="text-2xl font-semibold text-green-600">{fmt(totalAssets)}</p>
         </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
+        <div className="bg-white rounded-xl border border-slate-200 p-5 card-hover animate-slide-up anim-delay-1">
           <p className="text-xs text-slate-500 mb-1">Total Debt</p>
           <p className="text-2xl font-semibold text-red-500">{fmt(totalDebt)}</p>
         </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
+        <div className="bg-white rounded-xl border border-slate-200 p-5 card-hover animate-slide-up anim-delay-2">
           <p className="text-xs text-slate-500 mb-1">Net Worth</p>
           <p className={`text-2xl font-semibold ${netWorth >= 0 ? 'text-green-600' : 'text-red-500'}`}>
             {netWorth < 0 ? '-' : ''}{fmt(netWorth)}
           </p>
         </div>
         {totalMonthlyInterest > 0 && (
-          <div className="bg-orange-50 rounded-xl border border-orange-100 p-5">
+          <div className="bg-orange-50 rounded-xl border border-orange-100 p-5 card-hover animate-slide-up anim-delay-3">
             <p className="text-xs text-orange-500 mb-1">Est. Monthly Interest</p>
             <p className="text-2xl font-semibold text-orange-600">{fmt(totalMonthlyInterest)}</p>
           </div>
@@ -649,10 +938,19 @@ export default function AccountsPage() {
         onClose={() => setStatementAccountId(null)}
       />
 
+      {/* Accounts Review Wizard */}
+      {showReview && (
+        <AccountsReviewWizard
+          accounts={accounts}
+          onClose={() => setShowReview(false)}
+          onDone={() => { setShowReview(false); load() }}
+        />
+      )}
+
       {/* Add Account Modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 animate-scale-in">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-base font-semibold text-slate-800">
                 {editingAccount ? 'Edit Account' : 'Add Account'}
@@ -671,7 +969,7 @@ export default function AccountsPage() {
                   onChange={e => setFormName(e.target.value)}
                   className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
                   required
-                  autoFocus
+                  ref={formNameRef}
                 />
               </div>
 

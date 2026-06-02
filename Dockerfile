@@ -25,7 +25,6 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # Next.js standalone output
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
 
 # Rebuild native module against the runner's node version
 COPY --from=builder /app/node_modules/better-sqlite3 ./node_modules/better-sqlite3

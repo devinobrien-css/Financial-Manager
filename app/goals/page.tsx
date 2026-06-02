@@ -111,6 +111,8 @@ function GoalForm({ initial, onSave, onClose }: {
   const [color, setColor] = useState(initial?.color ?? 'blue')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const titleRef = useRef<HTMLInputElement>(null)
+  useEffect(() => { titleRef.current?.focus({ preventScroll: true }) }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -122,7 +124,7 @@ function GoalForm({ initial, onSave, onClose }: {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md animate-scale-in">
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
           <h3 className="text-base font-semibold text-slate-800">{initial ? 'Edit Goal' : 'Add Goal'}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors"><X className="w-5 h-5" /></button>
@@ -141,7 +143,7 @@ function GoalForm({ initial, onSave, onClose }: {
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">Title</label>
               <input type="text" placeholder="e.g. Pay off Chase Freedom" value={title} onChange={e => setTitle(e.target.value)}
-                className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300" autoFocus required />
+                className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300" ref={titleRef} required />
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">Notes (optional)</label>
@@ -285,15 +287,15 @@ export default function GoalsPage() {
   }
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-4 md:p-6 lg:p-8 max-w-6xl mx-auto">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-8">
         <div>
           <h2 className="text-2xl font-semibold text-slate-800">Goals</h2>
           <p className="text-sm text-slate-500 mt-1">Track and organize your financial goals. Drag to rearrange.</p>
         </div>
         <button
           onClick={() => { setEditingGoal(null); setShowGoalForm(true) }}
-          className="flex items-center gap-2 bg-slate-800 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-slate-700 transition-colors"
+          className="flex items-center gap-2 bg-slate-800 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-slate-700 transition-colors btn-press"
         >
           <Plus className="w-4 h-4" /> Add Goal
         </button>

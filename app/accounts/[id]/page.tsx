@@ -81,8 +81,8 @@ export default function StatementPage() {
   const expenses = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
-      <div className="flex items-center gap-3 mb-6">
+    <div className="p-4 md:p-6 lg:p-8 max-w-6xl mx-auto">
+      <div className="flex items-center gap-3 mb-8">
         <button
           onClick={() => router.push('/accounts')}
           className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 transition-colors"
@@ -99,29 +99,29 @@ export default function StatementPage() {
       </div>
 
       {!loading && account && (
-        <div className="flex gap-4 mb-6">
-          <div className="bg-white rounded-xl border border-slate-200 px-5 py-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          <div className="bg-white rounded-xl border border-slate-200 px-4 py-3">
             <p className="text-xs text-slate-400">Current Balance</p>
-            <p className={`text-xl font-semibold tabular-nums ${account.balance < 0 ? 'text-red-500' : 'text-slate-800'}`}>
-              {account.balance < 0 ? '-' : ''}{fmt(Math.abs(account.balance))}
+            <p className={`text-lg font-semibold tabular-nums ${account.balance < -0.005 ? 'text-red-500' : 'text-slate-800'}`}>
+              {account.balance < -0.005 ? '-' : ''}{fmt(Math.abs(account.balance))}
             </p>
           </div>
-          <div className="bg-green-50 rounded-xl border border-green-100 px-5 py-3">
+          <div className="bg-green-50 rounded-xl border border-green-100 px-4 py-3">
             <p className="text-xs text-slate-400">Total In</p>
-            <p className="text-xl font-semibold text-green-600">{fmt(income)}</p>
+            <p className="text-lg font-semibold text-green-600">{fmt(income)}</p>
           </div>
-          <div className="bg-red-50 rounded-xl border border-red-100 px-5 py-3">
+          <div className="bg-red-50 rounded-xl border border-red-100 px-4 py-3">
             <p className="text-xs text-slate-400">Total Out</p>
-            <p className="text-xl font-semibold text-red-500">{fmt(expenses)}</p>
+            <p className="text-lg font-semibold text-red-500">{fmt(expenses)}</p>
           </div>
-          <div className="bg-slate-50 rounded-xl border border-slate-200 px-5 py-3">
+          <div className="bg-slate-50 rounded-xl border border-slate-200 px-4 py-3">
             <p className="text-xs text-slate-400">Transactions</p>
-            <p className="text-xl font-semibold text-slate-700">{transactions.length}</p>
+            <p className="text-lg font-semibold text-slate-700">{transactions.length}</p>
           </div>
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
         {loading ? (
           <div className="p-6 text-slate-400 text-sm">Loading…</div>
         ) : rows.length === 0 ? (

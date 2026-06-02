@@ -41,7 +41,7 @@ export default function ReportsPage() {
   const { lock } = useAuth()
   const [year, setYear] = useState(new Date().getFullYear())
   const [monthlyData, setMonthlyData] = useState<Array<{
-    month: string; label: string; income: number; expenses: number; savings: number; debtPaid: number
+    month: string; label: string; income: number; expenses: number; savings: number; debtPaid: number; otherOutflow: number
   }>>([])
   const [allTx, setAllTx] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(false)
@@ -56,6 +56,8 @@ export default function ReportsPage() {
       accounts.filter(a => a.type === 'checking' || a.type === 'savings' || a.type === 'investment').map(a => a.id),
     )
     const debtAcctIds = new Set(accounts.filter(a => a.type === 'credit' || a.type === 'loan').map(a => a.id))
+    // Only exclude transfers to savings/investment accounts (user's own savings vehicles).
+    const assetAcctIds = new Set(accounts.filter(a => a.type === 'savings' || a.type === 'investment').map(a => a.id))
 
     const results = await Promise.all(
       months.map(m =>
@@ -68,15 +70,20 @@ export default function ReportsPage() {
     const monthly = results.map((txs, i) => {
       const income = txs.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
       const expenses = txs.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
-      // Outflow from savings pool (checking/savings/investment) to credit or loan = debt paydown.
+      // Transfers to credit/loan = debt paydown.
       const debtPaid = txs
         .filter(t => t.type === 'transfer'
-          && t.account_id && savingsPoolIds.has(t.account_id)
           && t.to_account_id && debtAcctIds.has(t.to_account_id))
         .reduce((s, t) => s + t.amount, 0)
-      // "Saved" = money that ended up in (or stayed in) the savings pool.
-      const savings = income - expenses - debtPaid
-      return { month: months[i], label: SHORT_MONTHS[i], income, expenses, savings, debtPaid }
+      // Transfers to external accounts (rent, bills paid via transfer, etc.) = real outflows.
+      const otherOutflow = txs
+        .filter(t => t.type === 'transfer'
+          && t.to_account_id
+          && !debtAcctIds.has(t.to_account_id)
+          && !assetAcctIds.has(t.to_account_id))
+        .reduce((s, t) => s + t.amount, 0)
+      const savings = income - expenses - debtPaid - otherOutflow
+      return { month: months[i], label: SHORT_MONTHS[i], income, expenses, savings, debtPaid, otherOutflow }
     })
     setMonthlyData(monthly)
     setAllTx(results.flat())
@@ -88,7 +95,8 @@ export default function ReportsPage() {
   const annualIncome = monthlyData.reduce((s, m) => s + m.income, 0)
   const annualExpenses = monthlyData.reduce((s, m) => s + m.expenses, 0)
   const annualDebtPaid = monthlyData.reduce((s, m) => s + m.debtPaid, 0)
-  const annualNet = annualIncome - annualExpenses - annualDebtPaid
+  const annualOtherOutflow = monthlyData.reduce((s, m) => s + m.otherOutflow, 0)
+  const annualNet = annualIncome - annualExpenses - annualDebtPaid - annualOtherOutflow
   const avgMonthlySavings = annualNet / 12
 
   const bestMonth = monthlyData
@@ -138,8 +146,8 @@ export default function ReportsPage() {
   }
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-4 md:p-6 lg:p-8 max-w-6xl mx-auto">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-8">
         <div>
           <h2 className="text-2xl font-semibold text-slate-800">Reports</h2>
           <p className="text-sm text-slate-500 mt-1">Year-in-review summary and export.</p>
@@ -176,32 +184,32 @@ export default function ReportsPage() {
       ) : (
         <>
           {/* Annual summary cards */}
-          <div className="grid grid-cols-5 gap-4 mb-8">
-            <div className="bg-white rounded-xl border border-slate-200 p-5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 mb-8">
+            <div className="bg-white rounded-xl border border-slate-200 p-4 card-hover animate-slide-up">
               <p className="text-xs text-slate-500 mb-1">Annual Income</p>
-              <p className="text-2xl font-semibold text-green-600 tabular-nums">{fmt(annualIncome)}</p>
+              <p className="text-lg sm:text-xl font-semibold text-green-600 tabular-nums">{fmt(annualIncome)}</p>
             </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-5">
+            <div className="bg-white rounded-xl border border-slate-200 p-4 card-hover animate-slide-up anim-delay-1">
               <p className="text-xs text-slate-500 mb-1">Annual Expenses</p>
-              <p className="text-2xl font-semibold text-red-500 tabular-nums">{fmt(annualExpenses)}</p>
+              <p className="text-lg sm:text-xl font-semibold text-red-500 tabular-nums">{fmt(annualExpenses)}</p>
             </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-5">
+            <div className="bg-white rounded-xl border border-slate-200 p-4 card-hover animate-slide-up anim-delay-2">
               <p className="text-xs text-slate-500 mb-1">Debt Paid Down</p>
-              <p className="text-2xl font-semibold text-blue-600 tabular-nums">{fmt(annualDebtPaid)}</p>
+              <p className="text-lg sm:text-xl font-semibold text-blue-600 tabular-nums">{fmt(annualDebtPaid)}</p>
             </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-5">
+            <div className="bg-white rounded-xl border border-slate-200 p-4 card-hover animate-slide-up anim-delay-3">
               <p className="text-xs text-slate-500 mb-1">Net Saved</p>
-              <p className={`text-2xl font-semibold tabular-nums ${annualNet >= 0 ? 'text-slate-800' : 'text-red-500'}`}>{fmt(annualNet)}</p>
+              <p className={`text-lg sm:text-xl font-semibold tabular-nums ${annualNet >= 0 ? 'text-slate-800' : 'text-red-500'}`}>{fmt(annualNet)}</p>
             </div>
-            <div className="bg-white rounded-xl border border-slate-200 p-5">
+            <div className="bg-white rounded-xl border border-slate-200 p-4 card-hover animate-slide-up anim-delay-4">
               <p className="text-xs text-slate-500 mb-1">Avg Monthly Savings</p>
-              <p className={`text-2xl font-semibold tabular-nums ${avgMonthlySavings >= 0 ? 'text-slate-800' : 'text-red-500'}`}>{fmt(avgMonthlySavings)}</p>
+              <p className={`text-lg sm:text-xl font-semibold tabular-nums ${avgMonthlySavings >= 0 ? 'text-slate-800' : 'text-red-500'}`}>{fmt(avgMonthlySavings)}</p>
             </div>
           </div>
 
           {/* Highlights */}
           {(bestMonth || worstMonth) && (
-            <div className="grid grid-cols-2 gap-4 mb-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
               {bestMonth && bestMonth.savings > 0 && (
                 <div className="bg-green-50 rounded-xl border border-green-100 px-5 py-4">
                   <p className="text-xs text-green-700 font-medium uppercase tracking-wide mb-1">Best Month</p>
@@ -213,7 +221,7 @@ export default function ReportsPage() {
                 <div className="bg-orange-50 rounded-xl border border-orange-100 px-5 py-4">
                   <p className="text-xs text-orange-700 font-medium uppercase tracking-wide mb-1">Most Spending</p>
                   <p className="text-lg font-semibold text-orange-800">{SHORT_MONTHS[parseInt(worstMonth.month.split('-')[1]) - 1]}</p>
-                  <p className="text-sm text-orange-600">{fmt(worstMonth.expenses)} expenses</p>
+                  <p className="text-sm text-orange-600">{fmt(worstMonth.expenses + worstMonth.otherOutflow)} total outflows</p>
                 </div>
               )}
             </div>
@@ -230,10 +238,11 @@ export default function ReportsPage() {
                 <Tooltip formatter={(v: number) => fmt(v)} />
                 <Bar dataKey="income" fill="#bbf7d0" name="Income" radius={[3, 3, 0, 0]} />
                 <Bar dataKey="expenses" fill="#fecaca" name="Expenses" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="otherOutflow" fill="#fed7aa" name="Other Outflows" radius={[3, 3, 0, 0]} />
                 <Bar dataKey="debtPaid" fill="#bfdbfe" name="Debt Paydown" radius={[3, 3, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
-            <p className="text-xs text-slate-400 mt-2">Debt paydown = transfers from checking/savings/investment to credit or loan accounts.</p>
+            <p className="text-xs text-slate-400 mt-2">Other Outflows = transfers to external accounts (rent, bills, etc.). Debt paydown = transfers to credit or loan accounts.</p>
           </div>
 
           {/* Monthly net chart */}

@@ -30,11 +30,6 @@ variable "compartment_ocid" {
   type        = string
 }
 
-variable "availability_domain" {
-  description = "Availability domain name (e.g. IWjO:US-ASHBURN-AD-1)"
-  type        = string
-}
-
 variable "ssh_public_key_path" {
   description = "Path to the SSH public key to install on the instance"
   type        = string
@@ -52,6 +47,12 @@ variable "registration_code" {
   type        = string
   sensitive   = true
   default     = ""
+}
+
+variable "ad_index" {
+  description = "Availability domain index to try (0, 1, or 2). Increment if you get 'Out of host capacity'."
+  type        = number
+  default     = 0
 }
 
 variable "repo_url" {

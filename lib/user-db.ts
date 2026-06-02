@@ -36,6 +36,12 @@ export function findUserByUsername(username: string): UserRow | undefined {
     .get(username.trim()) as UserRow | undefined
 }
 
+export function findUserById(id: string): UserRow | undefined {
+  return getUserDb()
+    .prepare('SELECT * FROM users WHERE id = ?')
+    .get(id) as UserRow | undefined
+}
+
 export function createUser(id: string, username: string): void {
   getUserDb()
     .prepare('INSERT INTO users (id, username) VALUES (?, ?)')
@@ -45,4 +51,10 @@ export function createUser(id: string, username: string): void {
 export function userCount(): number {
   const row = getUserDb().prepare('SELECT COUNT(*) as n FROM users').get() as { n: number }
   return row.n
+}
+
+export function updateUsername(id: string, newUsername: string): void {
+  getUserDb()
+    .prepare('UPDATE users SET username = ? WHERE id = ?')
+    .run(newUsername.trim(), id)
 }

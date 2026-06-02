@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { Plus, Trash2, ChevronLeft, ChevronRight, X, ArrowRight, ChevronDown, Wallet, CreditCard, Banknote, PiggyBank, Landmark, Pencil, Search, RefreshCw, ChevronUp } from 'lucide-react'
 import { useAuth } from '@/lib/auth-context'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
@@ -92,6 +92,10 @@ export default function TransactionsPage() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [recurring, setRecurring] = useState<RecurringTemplate[]>([])
   const [showForm, setShowForm] = useState(false)
+  const amountInputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (showForm) amountInputRef.current?.focus({ preventScroll: true })
+  }, [showForm])
   const [showRecurringForm, setShowRecurringForm] = useState(false)
   const [showRecurring, setShowRecurring] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -422,11 +426,14 @@ export default function TransactionsPage() {
   const expenses = transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
+    <div className="p-4 md:p-6 lg:p-8 max-w-6xl mx-auto">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-8">
+        <div>
           <h2 className="text-2xl font-semibold text-slate-800">Transactions</h2>
+          <p className="text-sm text-slate-500 mt-1">View, search, and manage your transactions by month.</p>
+        </div>
+        <div className="flex items-center gap-4">
           <div className="flex items-center gap-1">
             <button onClick={prevMonth} className="p-1.5 rounded-lg hover:bg-slate-200 transition-colors">
               <ChevronLeft className="w-4 h-4 text-slate-600" />
@@ -436,27 +443,27 @@ export default function TransactionsPage() {
               <ChevronRight className="w-4 h-4 text-slate-600" />
             </button>
           </div>
+          <button
+            onClick={() => { resetForm(); setShowForm(true) }}
+            className="flex items-center gap-2 bg-slate-800 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-slate-700 transition-colors btn-press"
+          >
+            <Plus className="w-4 h-4" />
+            Add Transaction
+          </button>
         </div>
-        <button
-          onClick={() => { resetForm(); setShowForm(true) }}
-          className="flex items-center gap-2 bg-slate-800 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-slate-700 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Add Transaction
-        </button>
       </div>
 
       {/* Mini summary */}
-      <div className="flex gap-4 mb-5">
-        <div className="bg-green-50 rounded-lg px-4 py-2 text-sm">
+      <div className="flex flex-wrap gap-2 mb-5">
+        <div className="bg-green-50 rounded-lg px-3 py-2 text-sm">
           <span className="text-slate-500">Income </span>
           <span className="font-semibold text-green-600">{fmt(income)}</span>
         </div>
-        <div className="bg-red-50 rounded-lg px-4 py-2 text-sm">
+        <div className="bg-red-50 rounded-lg px-3 py-2 text-sm">
           <span className="text-slate-500">Expenses </span>
           <span className="font-semibold text-red-500">{fmt(expenses)}</span>
         </div>
-        <div className="bg-slate-50 rounded-lg px-4 py-2 text-sm">
+        <div className="bg-slate-50 rounded-lg px-3 py-2 text-sm">
           <span className="text-slate-500">Net </span>
           <span className={`font-semibold ${income - expenses >= 0 ? 'text-green-600' : 'text-red-500'}`}>
             {fmt(income - expenses)}
@@ -551,7 +558,7 @@ export default function TransactionsPage() {
       </div>
 
       {/* Transaction list */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
         {loading ? (
           <div className="p-6 text-slate-400 text-sm">Loading…</div>
         ) : displayedTx.length === 0 ? (
@@ -721,7 +728,7 @@ export default function TransactionsPage() {
       {/* Add/Edit Transaction Modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto animate-scale-in">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-base font-semibold text-slate-800">{editingId ? 'Edit Transaction' : 'Add Transaction'}</h3>
               <button onClick={() => { resetForm(); setShowForm(false) }} className="text-slate-400 hover:text-slate-600">
@@ -760,7 +767,7 @@ export default function TransactionsPage() {
                   onChange={e => setFormAmount(e.target.value)}
                   className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
                   required
-                  autoFocus
+                  ref={amountInputRef}
                 />
               </div>
 
@@ -884,7 +891,7 @@ export default function TransactionsPage() {
       {/* Add Recurring Template Modal */}
       {showRecurringForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto animate-scale-in">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-base font-semibold text-slate-800">Add Recurring Template</h3>
               <button onClick={() => setShowRecurringForm(false)} className="text-slate-400 hover:text-slate-600">

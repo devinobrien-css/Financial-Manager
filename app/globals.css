@@ -15,3 +15,71 @@ body {
   color: var(--foreground);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
+
+/* ─── Keyframes ─────────────────────────────────────────────────────── */
+
+@keyframes fadeIn {
+  from { opacity: 0 }
+  to   { opacity: 1 }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(18px) }
+  to   { opacity: 1; transform: translateY(0) }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px) }
+  to   { opacity: 1; transform: translateY(0) }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.96) }
+  to   { opacity: 1; transform: scale(1) }
+}
+
+@keyframes slideUpSheet {
+  from { opacity: 0; transform: translateY(100%) }
+  to   { opacity: 1; transform: translateY(0) }
+}
+
+@keyframes shimmer {
+  from { background-position: -200% 0 }
+  to   { background-position:  200% 0 }
+}
+
+/* ─── Animation utilities ───────────────────────────────────────────── */
+
+.animate-fade-in   { animation: fadeIn   0.25s ease both }
+.animate-slide-up  { animation: slideUp  0.4s cubic-bezier(0.16, 1, 0.3, 1) both }
+.animate-slide-down { animation: slideDown 0.3s ease both }
+.animate-scale-in  { animation: scaleIn  0.25s cubic-bezier(0.16, 1, 0.3, 1) both }
+.animate-sheet-up  { animation: slideUpSheet 0.35s cubic-bezier(0.16, 1, 0.3, 1) both }
+.animate-page-in   { animation: fadeIn   0.25s ease both }
+
+/* Stagger delay helpers (use with animate-slide-up / animate-scale-in) */
+.anim-delay-1 { animation-delay:  60ms }
+.anim-delay-2 { animation-delay: 120ms }
+.anim-delay-3 { animation-delay: 180ms }
+.anim-delay-4 { animation-delay: 240ms }
+.anim-delay-5 { animation-delay: 300ms }
+
+/* ─── Card hover lift ────────────────────────────────────────────────── */
+
+.card-hover {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px -4px rgb(0 0 0 / 0.09), 0 2px 8px -2px rgb(0 0 0 / 0.05);
+}
+
+/* ─── Button press ───────────────────────────────────────────────────── */
+
+.btn-press {
+  transition: transform 0.1s ease, opacity 0.1s ease;
+}
+.btn-press:active:not(:disabled) {
+  transform: scale(0.97);
+  opacity: 0.9;
+}

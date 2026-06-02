@@ -60,6 +60,8 @@ function initSchema(db: Database.Database): void {
   migrateToV10(db)
   migrateToV11(db)
   migrateToV12(db)
+  migrateToV13(db)
+  migrateToV14(db)
 
   // Seed default categories
   seedCategories(db)
@@ -519,6 +521,30 @@ function migrateToV12(db: Database.Database): void {
   db.pragma('user_version = 12')
 }
 
+/**
+ * Migration v13: add "Interest" expense category to all existing accounts.
+ */
+function migrateToV13(db: Database.Database): void {
+  const version = db.pragma('user_version', { simple: true }) as number
+  if (version >= 13) return
+
+  db.prepare(`INSERT OR IGNORE INTO categories (name, type, color) VALUES ('Interest', 'expense', '#f97316')`).run()
+
+  db.pragma('user_version = 13')
+}
+
+/**
+ * Migration v14: add "Subscriptions" expense category to all existing databases.
+ */
+function migrateToV14(db: Database.Database): void {
+  const version = db.pragma('user_version', { simple: true }) as number
+  if (version >= 14) return
+
+  db.prepare(`INSERT OR IGNORE INTO categories (name, type, color) VALUES ('Subscriptions', 'expense', '#8b5cf6')`).run()
+
+  db.pragma('user_version = 14')
+}
+
 function seedCategories(db: Database.Database): void {
   const count = (db.prepare('SELECT COUNT(*) as c FROM categories').get() as { c: number }).c
   if (count === 0) {
@@ -543,6 +569,8 @@ function seedCategories(db: Database.Database): void {
       ['Shopping',      'expense', '#f59e0b'],
       ['Insurance',     'expense', '#64748b'],
       ['Taxes',         'expense', '#7c3aed'],
+      ['Interest',      'expense', '#f97316'],
+      ['Subscriptions', 'expense', '#8b5cf6'],
       ['Other Expense', 'expense', '#94a3b8'],
     ])
   }

@@ -4,7 +4,7 @@ import { ReactNode, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
-import { LockKeyhole, LayoutDashboard, ListOrdered, LogOut, Wallet, Target, Flag, BarChart2, Sun, Moon, TrendingUp, ShieldCheck } from 'lucide-react'
+import { LockKeyhole, LayoutDashboard, ListOrdered, LogOut, Wallet, Target, Flag, BarChart2, Sun, Moon, TrendingUp, ShieldCheck, Menu, X, UserCircle, ChartPie } from 'lucide-react'
 
 function LoginScreen() {
   const { login, register } = useAuth()
@@ -44,7 +44,7 @@ function LoginScreen() {
             <LockKeyhole className="w-8 h-8 text-slate-600" />
           </div>
         </div>
-        <h1 className="text-xl font-semibold text-center text-slate-800 mb-1">Financial Manager</h1>
+        <h1 className="text-xl font-semibold text-center text-slate-800 mb-1">Track your Stacks</h1>
         <p className="text-sm text-slate-500 text-center mb-6">
           {mode === 'login' ? 'Sign in to access your encrypted data.' : 'Create an account. All data is encrypted with your password.'}
         </p>
@@ -122,6 +122,7 @@ const navGroups = [
     items: [
       { href: '/accounts', label: 'Accounts', icon: Wallet },
       { href: '/transactions', label: 'Transactions', icon: ListOrdered },
+      { href: '/spending', label: 'Spending', icon: ChartPie },
       { href: '/reports', label: 'Reports', icon: BarChart2 },
     ],
   },
@@ -139,17 +140,27 @@ const navGroups = [
       { href: '/credit', label: 'Credit Health', icon: ShieldCheck },
     ],
   },
+  {
+    label: 'Account',
+    items: [
+      { href: '/profile', label: 'Profile', icon: UserCircle },
+    ],
+  },
 ]
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { state, username, lock } = useAuth()
   const pathname = usePathname()
   const [darkMode, setDarkMode] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
 
   useEffect(() => {
     const stored = localStorage.getItem('dark-mode')
     if (stored === 'true') { setDarkMode(true); document.documentElement.classList.add('dark') }
   }, [])
+
+  // Close mobile drawer on navigation
+  useEffect(() => { setMobileOpen(false) }, [pathname])
 
   const toggleDark = () => {
     setDarkMode(prev => {
@@ -174,10 +185,32 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen">
+      {/* Mobile top bar */}
+      <header className="md:hidden fixed top-0 inset-x-0 h-14 bg-slate-900 flex items-center px-4 z-40">
+        <button
+          onClick={() => setMobileOpen(o => !o)}
+          className="p-2 -ml-2 rounded-lg hover:bg-slate-800 transition-colors mr-2"
+          aria-label="Toggle menu"
+        >
+          {mobileOpen ? <X className="w-5 h-5 text-white" /> : <Menu className="w-5 h-5 text-white" />}
+        </button>
+        <span className="text-white font-semibold text-base">Track your Stacks</span>
+      </header>
+
+      {/* Mobile overlay */}
+      {mobileOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/50 z-40"
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className="fixed top-0 left-0 h-screen w-56 bg-slate-900 text-slate-300 flex flex-col py-6 px-4 pb-14 z-40">
-        <div className="mb-8 px-2">
-          <h1 className="text-white font-semibold text-base">Finance</h1>
+      <aside className={`fixed top-0 left-0 h-screen w-64 md:w-56 bg-slate-900 text-slate-300 flex flex-col py-6 px-4 pb-14 z-50
+        transition-transform duration-200 ease-in-out
+        md:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="mb-8 px-2 pt-14 md:pt-0">
+          <h1 className="text-white font-semibold text-base">Track your Stacks</h1>
           <p className="text-slate-500 text-xs mt-0.5">{username ?? 'Loading…'}</p>
         </div>
         <nav className="flex-1 space-y-5">
@@ -208,14 +241,14 @@ export function AppShell({ children }: { children: ReactNode }) {
         </nav>
         <button
           onClick={toggleDark}
-          className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-slate-800 hover:text-white transition-colors mt-2"
+          className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-slate-800 hover:text-white transition-colors mt-2 btn-press"
         >
           {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           {darkMode ? 'Light Mode' : 'Dark Mode'}
         </button>
         <button
           onClick={lock}
-          className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-slate-800 hover:text-white transition-colors mt-2"
+          className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-400 hover:bg-slate-800 hover:text-white transition-colors mt-2 btn-press"
         >
           <LogOut className="w-4 h-4" />
           Sign Out
@@ -223,7 +256,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Main */}
-      <main className="ml-56 min-h-screen bg-slate-50 dark:bg-slate-900">
+      <main className="md:ml-56 min-h-screen bg-slate-50 dark:bg-slate-900 pt-14 md:pt-0">
         {children}
       </main>
     </div>

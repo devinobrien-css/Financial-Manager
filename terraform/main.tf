@@ -96,7 +96,7 @@ resource "oci_core_subnet" "fm_subnet" {
 
 # ── Compute ─────────────────────────────────────────────────────────────────
 
-# Lookup the latest Oracle Linux 8 image (free tier eligible)
+# Lookup the latest Oracle Linux 8 x86_64 image for E2.1.Micro (free tier)
 data "oci_core_images" "oracle_linux" {
   compartment_id           = var.compartment_ocid
   operating_system         = "Oracle Linux"
@@ -106,9 +106,14 @@ data "oci_core_images" "oracle_linux" {
   sort_order               = "DESC"
 }
 
+# Auto-detect first available availability domain
+data "oci_identity_availability_domains" "ads" {
+  compartment_id = var.tenancy_ocid
+}
+
 resource "oci_core_instance" "fm_instance" {
   compartment_id      = var.compartment_ocid
-  availability_domain = var.availability_domain
+  availability_domain = data.oci_identity_availability_domains.ads.availability_domains[var.ad_index].name
   display_name        = "financial-manager"
   shape               = "VM.Standard.E2.1.Micro"
 

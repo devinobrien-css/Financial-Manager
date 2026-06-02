@@ -217,19 +217,19 @@ export default function WealthPage() {
   ]
 
   if (loading) {
-    return <div className="p-8 text-slate-400 text-sm">Loading…</div>
+    return <div className="p-4 md:p-6 lg:p-8 max-w-6xl mx-auto text-slate-400 text-sm">Loading…</div>
   }
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
+    <div className="p-4 md:p-6 lg:p-8 max-w-6xl mx-auto">
       <div className="mb-8">
         <h2 className="text-2xl font-semibold text-slate-800">Wealth Overview</h2>
         <p className="text-sm text-slate-500 mt-1">Track your net worth, savings rate, and path to financial independence.</p>
       </div>
 
       {/* KPI row */}
-      <div className="grid grid-cols-3 gap-4 mb-8">
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+        <div className="bg-white rounded-xl border border-slate-200 p-5 card-hover animate-slide-up">
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm text-slate-500">Net Worth</span>
             <div className={`rounded-lg p-2 ${netWorth >= 0 ? 'bg-green-50' : 'bg-red-50'}`}>
@@ -238,7 +238,7 @@ export default function WealthPage() {
           </div>
           <p className={`text-2xl font-semibold ${netWorth >= 0 ? 'text-green-600' : 'text-red-500'}`}>{netWorth < 0 ? '-' : ''}{fmt(Math.abs(netWorth))}</p>
         </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
+        <div className="bg-white rounded-xl border border-slate-200 p-5 card-hover animate-slide-up anim-delay-1">
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm text-slate-500">Savings Rate (this month)</span>
             <div className={`rounded-lg p-2 ${currentSavingsRate >= 20 ? 'bg-green-50' : currentSavingsRate >= 0 ? 'bg-yellow-50' : 'bg-red-50'}`}>
@@ -248,7 +248,7 @@ export default function WealthPage() {
           <p className={`text-2xl font-semibold ${currentSavingsRate >= 20 ? 'text-green-600' : currentSavingsRate >= 0 ? 'text-yellow-600' : 'text-red-500'}`}>{currentSavingsRate}%</p>
           <p className="text-xs text-slate-400 mt-1">12-mo avg: {avgSavingsRate}%</p>
         </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
+        <div className="bg-white rounded-xl border border-slate-200 p-5 card-hover animate-slide-up anim-delay-2">
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm text-slate-500">Total Investments</span>
             <div className="rounded-lg p-2 bg-purple-50">
@@ -284,7 +284,7 @@ export default function WealthPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-6 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
         {/* Asset Allocation */}
         <div className="bg-white rounded-xl border border-slate-200 p-5">
           <h3 className="text-sm font-medium text-slate-700 mb-4">Asset Allocation</h3>
@@ -341,7 +341,7 @@ export default function WealthPage() {
           <h3 className="text-sm font-medium text-slate-700">FIRE Calculator</h3>
           <span className="text-xs text-slate-400 ml-1">Financial Independence, Retire Early</span>
         </div>
-        <div className="grid grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div className="space-y-3">
             <div>
               <label className="block text-xs text-slate-500 mb-1">Monthly Expenses ($)</label>
@@ -431,7 +431,7 @@ export default function WealthPage() {
       {/* Milestones */}
       <div className="bg-white rounded-xl border border-slate-200 p-5">
         <h3 className="text-sm font-medium text-slate-700 mb-4">Milestones</h3>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {milestones.map(({ label, icon: Icon, reached }) => (
             <div key={label} className={`flex items-center gap-3 p-3 rounded-lg border ${reached ? 'bg-green-50 border-green-200' : 'bg-slate-50 border-slate-200 opacity-60'}`}>
               <div className={`rounded-lg p-1.5 ${reached ? 'bg-green-100' : 'bg-slate-200'}`}>

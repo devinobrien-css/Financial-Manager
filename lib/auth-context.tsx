@@ -11,6 +11,8 @@ interface AuthContextValue {
   login: (username: string, password: string) => Promise<string | null>
   register: (username: string, password: string, code?: string) => Promise<string | null>
   lock: () => Promise<void>
+  changeUsername: (newUsername: string) => Promise<string | null>
+  changePassword: (currentPassword: string, newPassword: string) => Promise<string | null>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -20,16 +22,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [username, setUsername] = useState<string | null>(null)
 
   useEffect(() => {
-    fetch('/api/auth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'status' }),
-    })
-      .then(r => r.json())
-      .then(data => {
-        if (data.loggedIn) { setState('unlocked') } else { setState('needs-login') }
-      })
-      .catch(() => setState('needs-login'))
+    let cancelled = false
+
+    const checkStatus = async (attempt = 0): Promise<void> => {
+      try {
+        const r = await fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'status' }),
+        })
+        if (cancelled) return
+        const data = await r.json()
+        if (data.loggedIn) { setState('unlocked'); setUsername(data.username ?? null) } else { setState('needs-login') }
+      } catch {
+        if (cancelled) return
+        // Retry once after 2 s (handles cold-start / transient network errors)
+        if (attempt === 0) {
+          setTimeout(() => { if (!cancelled) checkStatus(1) }, 2000)
+        } else {
+          setState('needs-login')
+        }
+      }
+    }
+
+    checkStatus()
+    return () => { cancelled = true }
   }, [])
 
   const login = async (user: string, password: string): Promise<string | null> => {
@@ -64,8 +81,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUsername(null)
   }
 
+  const changeUsername = async (newUsername: string): Promise<string | null> => {
+    const res = await fetch('/api/auth', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'change-username', newUsername }),
+    })
+    const data = await res.json()
+    if (res.ok) { setUsername(data.username); return null }
+    return data.error ?? 'Failed to update username'
+  }
+
+  const changePassword = async (currentPassword: string, newPassword: string): Promise<string | null> => {
+    const res = await fetch('/api/auth', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'change-password', currentPassword, newPassword }),
+    })
+    const data = await res.json()
+    if (res.ok) return null
+    return data.error ?? 'Failed to update password'
+  }
+
   return (
-    <AuthContext.Provider value={{ state, username, login, register, lock }}>
+    <AuthContext.Provider value={{ state, username, login, register, lock, changeUsername, changePassword }}>
       {children}
     </AuthContext.Provider>
   )

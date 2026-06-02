@@ -30,18 +30,7 @@ export function CustomSelect({
   const triggerRef = useRef<HTMLButtonElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (
-        triggerRef.current && !triggerRef.current.contains(e.target as Node) &&
-        dropdownRef.current && !dropdownRef.current.contains(e.target as Node)
-      ) setOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
-
-  const handleOpen = () => {
+  const updatePosition = () => {
     if (!triggerRef.current) return
     const rect = triggerRef.current.getBoundingClientRect()
     const spaceBelow = window.innerHeight - rect.bottom
@@ -56,6 +45,28 @@ export function CustomSelect({
       maxWidth: 420,
       zIndex: 9999,
     })
+  }
+
+  useEffect(() => {
+    const onMouseDown = (e: MouseEvent) => {
+      if (
+        triggerRef.current && !triggerRef.current.contains(e.target as Node) &&
+        dropdownRef.current && !dropdownRef.current.contains(e.target as Node)
+      ) setOpen(false)
+    }
+    const onScroll = () => {
+      if (open) updatePosition()
+    }
+    document.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('scroll', onScroll, true)
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('scroll', onScroll, true)
+    }
+  }, [open])
+
+  const handleOpen = () => {
+    updatePosition()
     setOpen(o => !o)
   }
 

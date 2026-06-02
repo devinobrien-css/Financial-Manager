@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { Plus, Trash2, CheckCircle, Circle, AlertTriangle, TrendingUp, CreditCard, ShieldCheck, X } from 'lucide-react'
 import { ConfirmDialog } from '@/components/ConfirmDialog'
 import {
@@ -83,6 +83,8 @@ export default function CreditPage() {
 
   // Add score form
   const [showScoreForm, setShowScoreForm] = useState(false)
+  const scoreInputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => { if (showScoreForm) scoreInputRef.current?.focus({ preventScroll: true }) }, [showScoreForm])
   const [newScore, setNewScore] = useState('')
   const [newDate, setNewDate] = useState(new Date().toISOString().slice(0, 10))
   const [newNotes, setNewNotes] = useState('')
@@ -234,19 +236,19 @@ export default function CreditPage() {
   const monthsSaved = (simWithMin?.months && simWithExtra?.months) ? Math.max(0, simWithMin.months - simWithExtra.months) : 0
 
   if (loading) {
-    return <div className="p-8 text-slate-400 text-sm">Loading…</div>
+    return <div className="p-4 md:p-6 lg:p-8 max-w-6xl mx-auto text-slate-400 text-sm">Loading…</div>
   }
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
+    <div className="p-4 md:p-6 lg:p-8 max-w-6xl mx-auto">
       <div className="mb-8">
         <h2 className="text-2xl font-semibold text-slate-800">Credit Health</h2>
         <p className="text-sm text-slate-500 mt-1">Monitor your credit score, utilization, and payment habits.</p>
       </div>
 
       {/* KPI row */}
-      <div className="grid grid-cols-3 gap-4 mb-8">
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+        <div className="bg-white rounded-xl border border-slate-200 p-5 card-hover animate-slide-up">
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm text-slate-500">Current Score</span>
             <div className="rounded-lg p-2 bg-blue-50">
@@ -262,7 +264,7 @@ export default function CreditPage() {
             <p className="text-slate-400 text-sm">No score logged yet</p>
           )}
         </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
+        <div className="bg-white rounded-xl border border-slate-200 p-5 card-hover animate-slide-up anim-delay-1">
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm text-slate-500">Overall Utilization</span>
             <div className={`rounded-lg p-2 ${overallUtilizationPct !== null && overallUtilizationPct < 30 ? 'bg-green-50' : 'bg-orange-50'}`}>
@@ -274,7 +276,7 @@ export default function CreditPage() {
           </p>
           <p className="text-xs text-slate-400 mt-1">Goal: keep below 30%</p>
         </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
+        <div className="bg-white rounded-xl border border-slate-200 p-5 card-hover animate-slide-up anim-delay-2">
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm text-slate-500">Score Checklist</span>
             <div className="rounded-lg p-2 bg-indigo-50">
@@ -286,7 +288,7 @@ export default function CreditPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-6 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-6">
         {/* Credit Score History */}
         <div className="bg-white rounded-xl border border-slate-200 p-5">
           <div className="flex items-center justify-between mb-4">
@@ -438,7 +440,7 @@ export default function CreditPage() {
             <AlertTriangle className="w-4 h-4 text-amber-500" />
             <h3 className="text-sm font-medium text-slate-700">What-If Debt Payoff Simulator</h3>
           </div>
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div className="space-y-3">
               <div>
                 <label className="block text-xs text-slate-500 mb-1">Select Account</label>
@@ -512,7 +514,7 @@ export default function CreditPage() {
       {/* Add Score Modal */}
       {showScoreForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 animate-scale-in">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-base font-semibold text-slate-800">Log Credit Score</h3>
               <button onClick={() => setShowScoreForm(false)} className="text-slate-400 hover:text-slate-600">
@@ -531,7 +533,7 @@ export default function CreditPage() {
                   onChange={e => setNewScore(e.target.value)}
                   className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
                   required
-                  autoFocus
+                  ref={scoreInputRef}
                 />
               </div>
               <div>

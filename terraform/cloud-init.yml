@@ -1,7 +1,6 @@
 #cloud-config
 # Bootstraps Docker + Docker Compose, clones the repo, and starts the app.
-# Terraform renders ${var.*} values via templatefile() — see main.tf.
-# Variables passed in: repo_url, session_secret, registration_code
+# Variables injected by Terraform templatefile(): repo_url, session_secret, registration_code
 
 package_update: true
 package_upgrade: true
