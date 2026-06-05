@@ -62,6 +62,7 @@ function initSchema(db: Database.Database): void {
   migrateToV12(db)
   migrateToV13(db)
   migrateToV14(db)
+  migrateToV15(db)
 
   // Seed default categories
   seedCategories(db)
@@ -543,6 +544,42 @@ function migrateToV14(db: Database.Database): void {
   db.prepare(`INSERT OR IGNORE INTO categories (name, type, color) VALUES ('Subscriptions', 'expense', '#8b5cf6')`).run()
 
   db.pragma('user_version = 14')
+}
+
+/**
+ * Migration v15: AI chat feature.
+ *  - chat_sessions: one row per conversation (title encrypted)
+ *  - chat_messages: one row per message (content encrypted; role plaintext)
+ *
+ * Message content can contain decrypted financial figures, so both the
+ * session title and message body are stored encrypted with the user key,
+ * consistent with every other sensitive field in this DB.
+ */
+function migrateToV15(db: Database.Database): void {
+  const version = db.pragma('user_version', { simple: true }) as number
+  if (version >= 15) return
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS chat_sessions (
+      id         TEXT PRIMARY KEY,
+      title_enc  TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id          TEXT PRIMARY KEY,
+      session_id  TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+      role        TEXT NOT NULL CHECK (role IN ('user','assistant')),
+      content_enc TEXT NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_session
+      ON chat_messages(session_id, created_at);
+  `)
+
+  db.pragma('user_version = 15')
 }
 
 function seedCategories(db: Database.Database): void {

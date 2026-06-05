@@ -4,7 +4,7 @@ import { ReactNode, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/lib/auth-context'
-import { LockKeyhole, LayoutDashboard, ListOrdered, LogOut, Wallet, Target, Flag, BarChart2, Sun, Moon, TrendingUp, ShieldCheck, Menu, X, UserCircle, ChartPie } from 'lucide-react'
+import { LockKeyhole, LayoutDashboard, ListOrdered, LogOut, Wallet, Target, Flag, BarChart2, Sun, Moon, TrendingUp, ShieldCheck, Menu, X, UserCircle, ChartPie, Sparkles } from 'lucide-react'
 
 function LoginScreen() {
   const { login, register } = useAuth()
@@ -115,6 +115,7 @@ const navGroups = [
     label: 'Overview',
     items: [
       { href: '/', label: 'Dashboard', icon: LayoutDashboard },
+      { href: '/chat', label: 'Assistant', icon: Sparkles },
     ],
   },
   {
